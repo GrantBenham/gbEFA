@@ -28,13 +28,13 @@ To run this application, you need the following R packages:
 - `dplyr`
 - `htmltools`
 - `base64enc`
-- `MVN`
+
 
 You can install the required packages using the following command:
 
 
 
-install.packages(c("shiny", "rmarkdown", "knitr", "kableExtra", "plotly", "htmlwidgets", "ggplot2", "reshape2", "psych", "dplyr", "htmltools", "base64enc", "MVN"))
+install.packages(c("shiny", "rmarkdown", "knitr", "kableExtra", "plotly", "htmlwidgets", "ggplot2", "reshape2", "psych", "dplyr", "htmltools", "base64enc"))
 
 
 ## Usage
