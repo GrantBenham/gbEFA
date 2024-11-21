@@ -917,7 +917,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       
       html_output_all <<- paste0(
         "<div style='color: red; font-weight: bold; margin: 20px 0;'>",
-        "<h4>⚠️ Analysis Halted</h4>",
+        "<h4>⚠��� Analysis Halted</h4>",
         error_msg,
         "</div>"
       )
@@ -1702,6 +1702,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
           }
         }
         
+        syntax <- paste0(syntax, "EXECUTE.\n")  # Append EXECUTE command here
         syntax <- paste0(syntax, "</pre>")
         return(syntax)
       }
