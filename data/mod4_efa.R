@@ -1248,8 +1248,8 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     variance_text <- paste0(
       "<p><strong>Proportion of Variance Explained by Each Factor:</strong><br>",
       paste0("Factor ", 1:length(variance_info), ": ", 
-             sprintf("%.1f%%", variance_info * 100), collapse = "<br>"),
-      "<br>Total: ", sprintf("%.1f%%", sum(variance_info) * 100), "</p>"
+             sprintf("%.2f%%", variance_info * 100), collapse = "<br>"),
+      "<br>Total: ", sprintf("%.2f%%", sum(variance_info) * 100), "</p>"
     )
     
     # Add factor correlation matrix if using oblique rotation
@@ -1614,7 +1614,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
           reliability_table_html,
           sprintf("<tr><td>PA%d</td>", f),
           sprintf("<td>%s</td>", paste(items, collapse=", ")),
-          sprintf("<td>%.1f</td>", variance_explained[f]),
+          sprintf("<td>%.2f</td>", variance_explained[f]),
           sprintf("<td>%s</td>", if(!is.na(alpha_value)) sprintf("%.3f", alpha_value) else "NA"),
           sprintf("<td>%s</td></tr>", if(!is.na(omega_value)) sprintf("%.3f", omega_value) else "NA")
         )

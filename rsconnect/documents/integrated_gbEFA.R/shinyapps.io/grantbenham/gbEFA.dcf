@@ -1,0 +1,13 @@
+name: gbEFA
+title: gbEFA
+username: grantbenham
+account: grantbenham
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 13336064
+bundleId: 10202158
+url: https://grantbenham.shinyapps.io/gbEFA/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: LICENSE|README.md|SSH 2024 12-4-2024 - 449s - nonresponders deleted - main measures completed HSP only for EFA.csv
