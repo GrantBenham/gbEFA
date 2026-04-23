@@ -41,16 +41,45 @@ mod4_efa_ui <- function(id) {
                   selected = "promax"),
         
         selectInput(ns("correlation"), "Correlation Matrix Type",
-                  choices = c("spearman", "pearson", "polychoric"),
-                  selected = "spearman"),
+                  choices = c("Polychoric" = "polychoric",
+                              "Pearson" = "pearson",
+                              "Spearman" = "spearman"),
+                  selected = "polychoric"),
         
-        helpText("Note: Polychoric correlations are recommended for ordinal data (e.g., Likert scales)"),
+        helpText("Polychoric is often useful for ordinal Likert items; Pearson is a traditional continuous-style option; Spearman is useful as a robustness check."),
         
         numericInput(ns("loading_threshold"), "Loading Threshold",
                    value = 0.3, min = 0, max = 1, step = 0.05),
         
         numericInput(ns("communality_threshold"), "Communality Threshold",
                    value = 0.2, min = 0, max = 1, step = 0.05),
+        
+        h4("Optional Rule Enforcement"),
+        checkboxInput(
+          ns("enforce_sample_size_rule"),
+          tags$span(
+            "Hard-stop if sample size is below 3 x number of variables",
+            title = "If checked, analysis will stop when sample size is below this rule-of-thumb."
+          ),
+          value = FALSE
+        ),
+        checkboxInput(
+          ns("enforce_initial_items_per_factor_rule"),
+          tags$span(
+            "Hard-stop if initial average items per factor is below 3",
+            title = "If checked, analysis will stop before iteration when items/factors is below 3."
+          ),
+          value = FALSE
+        ),
+        checkboxInput(
+          ns("enforce_iterative_items_per_factor_rule"),
+          tags$span(
+            "Hard-stop during iterations if average items per factor drops below 3",
+            title = "If checked, the iterative process will stop when remaining items/factors is below 3."
+          ),
+          value = FALSE
+        ),
+        helpText("Leave these unchecked to continue with warnings only."),
         
         numericInput(ns("scale_min"), "Scale Minimum Value", 
                      value = 1, min = 0, max = 10),
@@ -87,72 +116,80 @@ mod4_efa_server <- function(id) {
       req(data())
       n_vars <- ncol(data())
       
-      # More conservative maximum factors calculation
-      max_factors <- min(
+      # Heuristic recommendation only; hard technical maximum is n_vars - 1.
+      recommended_max_factors <- min(
         floor((n_vars - sqrt(n_vars))/2),  # Traditional formula
         floor(n_vars/3),                   # One-third rule
         n_vars - 1                         # Must be less than number of variables
       )
       
-      # Ensure at least 1 factor but no more than conservative maximum
-      max_factors <- max(1, min(max_factors, 5))  # Cap at 5 factors for stability
+      recommended_max_factors <- max(1, recommended_max_factors)
+      technical_max_factors <- max(1, n_vars - 1)
       
       div(
         numericInput(session$ns("nfactors"), 
                     "Number of Factors",
-                    value = min(3, max_factors), 
+                    value = min(3, technical_max_factors), 
                     min = 1,
-                    max = max_factors),
+                    max = technical_max_factors),
         helpText(sprintf(
-          "Maximum recommended factors: %d\n
-          Based on your data having %d variables.\n
-          Note: Maximum is limited to ensure stable results.",
-          max_factors, n_vars
+          "Recommended maximum: %d factors based on %d variables. You can request up to %d factors, but higher values may be unstable.",
+          recommended_max_factors, n_vars, technical_max_factors
         ))
       )
     })
     
     # Reactive values to store analysis results
     results <- reactiveVal(NULL)
-    
-    # Validate inputs
+    # Validate inputs and collect warning-only checks.
     validate_inputs <- function(data, input) {
-      if(ncol(data) < 2) {
-        return("Dataset must contain at least 2 variables")
+      errors <- character(0)
+      warnings <- character(0)
+      n_items <- ncol(data)
+      n_people <- nrow(data)
+      
+      if(n_items < 2) {
+        errors <- c(errors, "Dataset must contain at least 2 variables.")
       }
-      if(nrow(data) < 3 * ncol(data)) {
-        return("Sample size should be at least 3 times the number of variables")
+      if(input$nfactors < 1) {
+        errors <- c(errors, "Number of factors must be at least 1.")
       }
-      
-      n_vars <- ncol(data)
-      
-      # Use the same conservative maximum factors calculation
-      max_factors <- min(
-        floor((n_vars - sqrt(n_vars))/2),  # Traditional formula
-        floor(n_vars/3),                   # One-third rule
-        n_vars - 1                         # Must be less than number of variables
-      )
-      
-      # Cap at 5 factors for stability
-      max_factors <- max(1, min(max_factors, 5))
-      
-      if(input$nfactors > max_factors) {
-        return(sprintf(
-          "Number of factors (%d) is too high for %d variables.\n
-          Maximum recommended factors: %d\n\n
-          Having too many factors can lead to:\n
-          • Convergence problems<br>
-          • Unstable results<br>
-           Unreliable factor structure<br><br>
-          Please reduce the number of factors.",
-          input$nfactors, n_vars, max_factors
+      if(input$nfactors >= n_items) {
+        errors <- c(errors, sprintf(
+          "Number of factors (%d) must be smaller than the number of variables (%d).",
+          input$nfactors, n_items
         ))
       }
       
-      if(input$nfactors < 1) {
-        return("Number of factors must be at least 1")
+      sample_size_message <- sprintf(
+        "Caution: Sample size (%d) is below the common guideline of 3 x variables (%d). Results can still be explored, but stability may be lower.",
+        n_people, 3 * n_items
+      )
+      if(n_people < 3 * n_items) {
+        if(isTRUE(input$enforce_sample_size_rule)) {
+          errors <- c(errors, paste0(sample_size_message, " Hard-stop is enabled for this rule."))
+        } else {
+          warnings <- c(warnings, sample_size_message)
+        }
       }
-      return(NULL)
+      
+      items_per_factor_message <- paste0(
+        "Caution: The requested number of factors would yield fewer than 3 items per factor on average. ",
+        "Factors with fewer than 3 strong primary indicators are often weaker, less stable, and harder to interpret. ",
+        "You may still proceed, but interpret the solution cautiously."
+      )
+      if((n_items / input$nfactors) < 3) {
+        if(isTRUE(input$enforce_initial_items_per_factor_rule)) {
+          errors <- c(errors, paste0(items_per_factor_message, " Hard-stop is enabled for this rule."))
+        } else {
+          warnings <- c(warnings, items_per_factor_message)
+        }
+      }
+      
+      list(
+        errors = unique(errors),
+        warnings = unique(warnings)
+      )
     }
     
     # Observe run button click
@@ -160,11 +197,14 @@ mod4_efa_server <- function(id) {
       req(input$data_file)
       
       data <- read.csv(input$data_file$datapath)
-      
-      validation_error <- validate_inputs(data, input)
-      if(!is.null(validation_error)) {
+      validation <- validate_inputs(data, input)
+      if(length(validation$errors) > 0) {
+        error_html <- paste0(
+          "<strong>Cannot run analysis yet:</strong><br>",
+          paste(sprintf("&bull; %s", validation$errors), collapse = "<br>")
+        )
         showNotification(
-          HTML(validation_error),
+          HTML(error_html),
           type = "error",
           duration = NULL,  # Makes notification stay until closed
           closeButton = TRUE
@@ -172,6 +212,18 @@ mod4_efa_server <- function(id) {
         return()
       }
       
+      if(length(validation$warnings) > 0) {
+        warning_html <- paste0(
+          "<strong>Proceeding with caution:</strong><br>",
+          paste(sprintf("&bull; %s", validation$warnings), collapse = "<br>")
+        )
+        showNotification(
+          HTML(warning_html),
+          type = "warning",
+          duration = 12,
+          closeButton = TRUE
+        )
+      }
       tryCatch({
         withProgress(message = 'Running EFA Analysis', value = 0, {
           # Data loading
@@ -180,32 +232,6 @@ mod4_efa_server <- function(id) {
           
           # Initial checks
           incProgress(0.2, detail = "Performing initial checks...")
-          
-          # Calculate maximum recommended factors based on number of variables
-          n_vars <- ncol(data)
-          max_factors <- floor((n_vars - sqrt(n_vars))/2)
-          
-          # Validate number of factors
-          if (input$nfactors > max_factors) {
-            showNotification(
-              HTML(sprintf(
-                "<strong>Factor Analysis Error</strong><br>
-                The number of factors (%d) is too high for %d variables.<br>
-                Maximum recommended factors: %d<br><br>
-                Having too many factors can lead to:<br>
-                • Convergence problems<br>
-                • Unstable results<br>
-                • Unreliable factor structure<br><br>
-                Please reduce the number of factors.",
-                input$nfactors, n_vars, max_factors
-              )),
-              type = "error",
-              duration = NULL,  # Stays visible until dismissed
-              closeButton = TRUE
-            )
-            stop("Too many factors requested")
-          }
-          
           # Running EFA
           incProgress(0.4, detail = "Running factor analysis...")
           result <- perform_iterative_efa(
@@ -216,7 +242,9 @@ mod4_efa_server <- function(id) {
             extraction_method = input$extraction,
             loading_threshold = input$loading_threshold,
             communality_threshold = input$communality_threshold,
-            filename = basename(input$data_file$name)
+            filename = basename(input$data_file$name),
+            pre_run_warnings = validation$warnings,
+            enforce_iterative_items_per_factor_rule = isTRUE(input$enforce_iterative_items_per_factor_rule)
           )
           
           # Finalizing
@@ -232,8 +260,8 @@ mod4_efa_server <- function(id) {
               "<strong>Factor Analysis Error</strong><br>",
               "Analysis failed to converge after 500 iterations.<br>",
               "This usually means either:<br>",
-              "• Too many factors requested<br>", 
-              "• High multicollinearity in data<br>",
+              "â€¢ Too many factors requested<br>", 
+              "â€¢ High multicollinearity in data<br>",
               "Try reducing the number of factors or removing highly correlated variables."
             )),
             type = "error",
@@ -247,9 +275,9 @@ mod4_efa_server <- function(id) {
               "Subscript out of bounds error.<br>",
               "This usually means the correlation matrix is not positive definite.<br>",
               "Try:<br>",
-              "• Reducing number of factors<br>",
-              "• Removing highly correlated variables<br>",
-              "• Using a different extraction method"
+              "â€¢ Reducing number of factors<br>",
+              "â€¢ Removing highly correlated variables<br>",
+              "â€¢ Using a different extraction method"
             )),
             type = "error",
             duration = NULL,
@@ -300,7 +328,7 @@ mod4_efa_server <- function(id) {
       cat("\nDEBUG: Rendering warning panel")
       cat("\nDEBUG: Results class:", class(results()))
       
-      warnings_list <- list()
+      warnings_list <- character(0)
       
       # Safely check for correlation warnings
       if(is.list(results()) && !is.null(results()$correlation_warnings)) {
@@ -311,21 +339,10 @@ mod4_efa_server <- function(id) {
       # Safely check for other warnings
       if(is.list(results()) && !is.null(results()$warnings)) {
         cat("\nDEBUG: Found general warnings")
-        if(is.character(results()$warnings)) {
-          if(any(grepl("Heywood", results()$warnings))) {
-            warnings_list <- c(warnings_list, 
-              "An ultra-Heywood case was detected. This means that one or more variables 
-               have communalities greater than 1, which is theoretically impossible. 
-               The results should be interpreted with extreme caution.")
-          }
-          
-          if(any(grepl("factor scores", results()$warnings))) {
-            warnings_list <- c(warnings_list,
-              "The factor score estimates may be unreliable. This could be due to 
-               various issues including multicollinearity or poor model fit.")
-          }
-        }
+        warnings_list <- c(warnings_list, results()$warnings)
       }
+      
+      warnings_list <- unique(trimws(warnings_list[nzchar(warnings_list)]))
       
       # Create warning panel if there are warnings
       if(length(warnings_list) > 0) {
@@ -406,7 +423,9 @@ create_report_template <- function(results, format) {
 # Modified perform_iterative_efa function
 perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "spearman",
                                   extraction_method = "pa", loading_threshold = 0.3,
-                                  communality_threshold = 0.2, filename = "dataset") {
+                                  communality_threshold = 0.2, filename = "dataset",
+                                  pre_run_warnings = character(0),
+                                  enforce_iterative_items_per_factor_rule = FALSE) {
   
   # Add at start of function to prevent plot generation
   void_dev <- function() {
@@ -445,33 +464,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
   }, error = function(e) {
     # If reliability calculations fail, keep NA values
   })
-  
-  # Calculate maximum recommended factors based on number of variables
-  n_vars <- ncol(data)
-  max_factors <- floor((n_vars - sqrt(n_vars))/2)
-  
-  # Validate number of factors
-  if (nfactors > max_factors) {
-    showNotification(
-      HTML(sprintf(
-        "<strong>Factor Analysis Error</strong><br>
-        The number of factors (%d) is too high for %d variables.<br>
-        Maximum recommended factors: %d<br><br>
-        Having too many factors can lead to:<br>
-        • Convergence problems<br>
-        • Unstable results<br>
-        • Unreliable factor structure<br><br>
-        Please reduce the number of factors.",
-        nfactors, n_vars, max_factors
-      )),
-      type = "error",
-      duration = NULL,  # Stays visible until dismissed
-      closeButton = TRUE
-    )
-    stop("Too many factors requested")
-  }
-  
-  # Initialize HTML output accumulator
+# Initialize HTML output accumulator
   html_output_all <- ""
   
   # Initialize tracking variables
@@ -486,6 +479,43 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
   
   # Initialize warnings collector
   correlation_warnings <- character(0)
+  analysis_warnings <- unique(pre_run_warnings[nzchar(pre_run_warnings)])
+  iteration_warning_log <- list()
+  
+  add_analysis_warning <- function(message_text, iteration_id = NULL) {
+    if(is.null(message_text) || !nzchar(trimws(message_text))) {
+      return(invisible(NULL))
+    }
+    analysis_warnings <<- unique(c(analysis_warnings, message_text))
+    if(!is.null(iteration_id)) {
+      existing <- iteration_warning_log[[iteration_id]]
+      iteration_warning_log[[iteration_id]] <<- unique(c(existing, message_text))
+    }
+    invisible(NULL)
+  }
+  
+  build_warning_summary_html <- function(warnings_vec) {
+    warnings_vec <- unique(warnings_vec[nzchar(warnings_vec)])
+    if(length(warnings_vec) == 0) {
+      return("")
+    }
+    paste0(
+      "<div style='background-color:#fff3cd; border:1px solid #ffeeba; padding:12px; margin:12px 0;'>",
+      "<h3 style='margin-top:0;'>Analysis Warning Summary</h3>",
+      "<ul>",
+      paste(sprintf("<li>%s</li>", warnings_vec), collapse = ""),
+      "</ul>",
+      "</div>"
+    )
+  }
+  
+  # Keep hard-stop only for technically invalid factor requests.
+  if(nfactors >= ncol(data)) {
+    stop(sprintf(
+      "Number of factors (%d) must be smaller than the number of variables (%d).",
+      nfactors, ncol(data)
+    ))
+  }
   
   # Calculate correlation matrix based on type
   spearman_corr <- tryCatch({
@@ -647,16 +677,16 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     summary_text <- paste0(
       "<p><strong>Note on normality thresholds:</strong></p>",
       "<p><strong>Skewness:</strong><br>",
-      "• Values in orange (|skew| > 1) indicate moderate asymmetry<br>",
-      "• Values in red (|skew| > 2) indicate severe asymmetry<br>",
-      "• Values close to 0 indicate symmetry</p>",
+      "â€¢ Values in orange (|skew| > 1) indicate moderate asymmetry<br>",
+      "â€¢ Values in red (|skew| > 2) indicate severe asymmetry<br>",
+      "â€¢ Values close to 0 indicate symmetry</p>",
       "<p><strong>Excess Kurtosis:</strong><br>",
       "The values shown are excess kurtosis (kurtosis - 3), centered around 0:<br>",
-      "• Positive values indicate heavier tails than normal distribution (leptokurtic)<br>",
-      "• Negative values indicate lighter tails than normal distribution (platykurtic)<br>",
-      "• Values close to 0 indicate normal-like tail weight (mesokurtic)<br>",
-      "• Values in orange (|excess kurtosis| > 1) indicate moderate deviation from normality<br>",
-      "• Values in red (|excess kurtosis| > 3) indicate severe deviation from normality</p>"
+      "â€¢ Positive values indicate heavier tails than normal distribution (leptokurtic)<br>",
+      "â€¢ Negative values indicate lighter tails than normal distribution (platykurtic)<br>",
+      "â€¢ Values close to 0 indicate normal-like tail weight (mesokurtic)<br>",
+      "â€¢ Values in orange (|excess kurtosis| > 1) indicate moderate deviation from normality<br>",
+      "â€¢ Values in red (|excess kurtosis| > 3) indicate severe deviation from normality</p>"
     )
     
     list(table = tbl, summary = summary_text)
@@ -709,6 +739,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
   
   # Main EFA iteration loop
   repeat {
+    iteration_specific_warnings <- character(0)
     # Add debugging
     cat("\n-------- DEBUG INFO --------\n")
     cat(sprintf("Current iteration: %d\n", iteration))
@@ -719,9 +750,16 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     
     # Check if we have enough variables for stable factor analysis
     if(ncol(spearman_corr) <= nfactors) {
+      add_analysis_warning(
+        sprintf(
+          "Analysis halted at iteration %d because remaining variables (%d) were not greater than requested factors (%d).",
+          iteration, ncol(spearman_corr), nfactors
+        ),
+        iteration
+      )
       warning_html <- paste0(
         "<div style='color: red; font-weight: bold; margin: 20px 0;'>",
-        "<h4>⚠️ Analysis Halted</h4>",
+        "<h4>Analysis Halted</h4>",
         sprintf("Iteration %d: Number of variables (%d) must be greater than number of factors (%d).<br>", 
                 iteration, ncol(spearman_corr), nfactors),
         "The analysis cannot proceed with the current factor structure.<br>",
@@ -730,7 +768,9 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       )
       
       # Create final HTML output
+      warning_summary_html <- build_warning_summary_html(unique(c(analysis_warnings, correlation_warnings)))
       html_output_all <- paste(
+        warning_summary_html,
         paste(iteration_results[1:(iteration-1)], collapse = "<hr>"),
         warning_html,
         sep = "<hr>"
@@ -746,8 +786,9 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         final_alpha = cronbach_alpha,
         final_omega = mcdonalds_omega,
         html_output = html_output_all,
-        warnings = "Insufficient variables for requested factors",
-        correlation_warnings = correlation_warnings
+        warnings = unique(c(analysis_warnings, "Insufficient variables for requested factors")),
+        correlation_warnings = correlation_warnings,
+        iteration_warnings = iteration_warning_log
       ))
     }
     
@@ -766,20 +807,22 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     result <- tryCatch({
       cat("DEBUG: Starting tryCatch block\n")
       
-      # Check if we have enough variables for stable solution
+      # Check the average items-per-factor heuristic.
       if(ncol(spearman_corr) < (nfactors * 3)) {
-        stop(sprintf(
-          "Insufficient variables (%d) remaining to extract %d factors.<br><br>
-          <strong>Why this happened:</strong><br>
-          • Each factor needs at least 3 items for reliable measurement<br>
-          • After removing problematic items, only %d variables remain<br>
-          • This can support at most %d factors<br><br>
-          <strong>Recommendations:</strong><br>
-          1. Reduce the number of factors to %d or fewer, or<br>
-          2. Adjust your thresholds to retain more variables",
-          ncol(spearman_corr), nfactors, ncol(spearman_corr), 
-          floor(ncol(spearman_corr)/3), floor(ncol(spearman_corr)/3)
-        ))
+        ratio_warning <- paste0(
+          "Caution (iteration ", iteration, "): Fewer than 3 items per factor on average (",
+          ncol(spearman_corr), " items / ", nfactors, " factors). ",
+          "Factors with fewer than 3 strong primary indicators are often weaker, less stable, and harder to interpret."
+        )
+        iteration_specific_warnings <- unique(c(iteration_specific_warnings, ratio_warning))
+        add_analysis_warning(ratio_warning, iteration)
+        
+        if(isTRUE(enforce_iterative_items_per_factor_rule)) {
+          stop(paste0(
+            ratio_warning,
+            "<br><br>Hard-stop is enabled for this rule. Reduce factors or adjust thresholds to retain more items."
+          ))
+        }
       }
       
       # Try the EFA
@@ -841,7 +884,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         # If post-processing fails, create error message and stop
         html_output_all <<- paste0(
           "<div style='color: red; font-weight: bold; margin: 20px 0;'>",
-          "<h4>⚠️ Analysis Halted</h4>",
+          "<h4>Analysis Halted</h4>",
           "Factor analysis completed but results processing failed.<br>",
           "Error details: ", e$message, "<br>",
           if(extraction_method == "ml") {
@@ -871,53 +914,84 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     }, error = function(e) {
       cat("\nDEBUG: Main error handler triggered\n")
       cat("DEBUG: Error message:", e$message, "\n")
+      failure_context <- sprintf(
+        "<strong>Failure point:</strong> Iteration %d with %d remaining item(s) and %d requested factor(s).<br>",
+        iteration, ncol(spearman_corr), nfactors
+      )
+      recent_removals <- if(
+        iteration > 1 &&
+        length(iteration_removals) >= (iteration - 1) &&
+        length(iteration_removals[[iteration - 1]]) > 0
+      ) {
+        paste(iteration_removals[[iteration - 1]], collapse = ", ")
+      } else {
+        NULL
+      }
+      prior_step_note <- if(!is.null(recent_removals)) {
+        paste0(
+          "<strong>Most recent item removal(s) before this fit:</strong> ",
+          recent_removals,
+          "<br><br>"
+        )
+      } else {
+        "<strong>No item removals had occurred before this failed fit.</strong><br><br>"
+      }
       
       # Create user-friendly error message based on error type
       error_msg <- if(grepl("Insufficient variables", e$message)) {
-        # Use the custom message we created above
         e$message
       } else if(grepl("subscript out of bounds", e$message)) {
-        sprintf(
-          "Factor analysis failed to find a stable solution with %d factors.<br><br>
-          <strong>Why this happened:</strong><br>
-          • The analysis couldn't find enough distinct factors in your data<br>
-          • This often occurs when requesting too many factors<br>
-          • Your data might naturally contain fewer underlying factors<br><br>
-          <strong>Recommendations:</strong><br>
-          1. Try reducing the number of factors<br>
-          2. Examine the scree plot in Module 2 to determine the optimal number of factors<br>
-          3. Consider theoretical reasons for the number of factors you expect",
-          nfactors
+        paste0(
+          failure_context,
+          prior_step_note,
+          sprintf(
+            "Factor analysis failed to find a stable solution with %d factors at this iteration.<br><br>
+            <strong>Why this happened:</strong><br>
+            1. The model could not recover enough distinct factors in the remaining item set<br>
+            2. This often occurs when the requested factor count is too high for the retained items<br>
+            3. Your data may contain fewer underlying factors after item pruning<br><br>
+            <strong>Recommendations:</strong><br>
+            1. Try reducing the number of factors<br>
+            2. Compare this run against the completed iteration results shown above<br>
+            3. Use Module 2 plus theory to choose the next factor count to test",
+            nfactors
+          )
         )
       } else if(grepl("maximum iteration exceeded", e$message)) {
-        sprintf(
-          "Factor analysis failed to converge after 500 iterations.<br><br>
-          <strong>Why this happened:</strong><br>
-          • The algorithm couldn't find a stable solution with %d factors<br>
-          • This usually means either:<br>
-          &nbsp;&nbsp;- Too many factors requested<br>
-          &nbsp;&nbsp;- High multicollinearity in data<br><br>
-          <strong>Recommendations:</strong><br>
-          1. Try reducing the number of factors<br>
-          2. Check for highly correlated variables<br>
-          3. Consider using a different rotation method",
-          nfactors
+        paste0(
+          failure_context,
+          prior_step_note,
+          sprintf(
+            "Factor analysis failed to converge after 500 iterations.<br><br>
+            <strong>Why this happened:</strong><br>
+            1. The algorithm could not find a stable solution with %d factors<br>
+            2. This usually means either too many factors were requested or the matrix became unstable after item removal<br><br>
+            <strong>Recommendations:</strong><br>
+            1. Try reducing the number of factors<br>
+            2. Compare this run against the completed iteration results shown above<br>
+            3. Consider an alternative rotation or extraction setting as a sensitivity check",
+            nfactors
+          )
         )
       } else {
-        sprintf(
-          "An unexpected error occurred during factor analysis.<br><br>
-          Error details: %s<br><br>
-          <strong>Recommendations:</strong><br>
-          1. Try reducing the number of factors<br>
-          2. Check your data for anomalies<br>
-          3. Consider using different analysis parameters",
-          e$message
+        paste0(
+          failure_context,
+          prior_step_note,
+          sprintf(
+            "An unexpected error occurred during factor analysis.<br><br>
+            Error details: %s<br><br>
+            <strong>Recommendations:</strong><br>
+            1. Try reducing the number of factors<br>
+            2. Compare this run against the completed iteration results shown above<br>
+            3. Consider trying different analysis parameters",
+            e$message
+          )
         )
       }
       
       html_output_all <<- paste0(
         "<div style='color: red; font-weight: bold; margin: 20px 0;'>",
-        "<h4>⚠��� Analysis Halted</h4>",
+        "<h4>Analysis Halted</h4>",
         error_msg,
         "</div>"
       )
@@ -932,10 +1006,33 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     # Check result status
     if(!result$success) {
       cat("DEBUG: Analysis failed, returning results\n")
+      warning_summary_html <- build_warning_summary_html(unique(c(analysis_warnings, correlation_warnings)))
+      prior_iteration_html <- if(length(iteration_results) > 0) {
+        paste0(
+          "<hr><h2>Detailed Iteration Results Completed Before Halt</h2>",
+          paste(iteration_results, collapse = "<hr>")
+        )
+      } else {
+        ""
+      }
+      failure_block_html <- if(length(iteration_results) > 0) {
+        paste0("<hr>", result$html_output)
+      } else {
+        result$html_output
+      }
       return(list(
         efa_result = last_successful_efa,
-        html_output = result$html_output,
-        warnings = "Analysis failed - too many factors for current variables"
+        html_output = paste0(
+          warning_summary_html,
+          prior_iteration_html,
+          failure_block_html
+        ),
+        warnings = unique(c(
+          analysis_warnings,
+          "Analysis halted before reaching a stable final solution."
+        )),
+        correlation_warnings = correlation_warnings,
+        iteration_warnings = iteration_warning_log
       ))
     }
     
@@ -1080,17 +1177,31 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     })
     
     cat("DEBUG: Pattern matrix creation completed\n")
+    if(length(iteration_specific_warnings) > 0) {
+      iteration_warning_log[[iteration]] <- unique(c(iteration_warning_log[[iteration]], iteration_specific_warnings))
+      iteration_warning_html <- paste0(
+        "<div style='background-color:#fff3cd; border:1px solid #ffeeba; padding:10px; margin:10px 0;'>",
+        "<strong>Iteration caution(s):</strong>",
+        "<ul>",
+        paste(sprintf("<li>%s</li>", iteration_specific_warnings), collapse = ""),
+        "</ul>",
+        "</div>"
+      )
+    } else {
+      iteration_warning_html <- ""
+    }
     
     # Generate HTML output for this iteration
     html_output_iteration <- paste0(
       "<h3>EFA Iteration ", iteration, "</h3>",
       "<h4>SUMMARY</h4>",
+      iteration_warning_html,
       "<p><strong>Current Analysis Status:</strong><br>",
-      "• Number of variables in analysis: ", ncol(spearman_corr), "<br>",
-      "• Variables being analyzed: ", paste(colnames(spearman_corr), collapse=", "), "</p>",
+      "â€¢ Number of variables in analysis: ", ncol(spearman_corr), "<br>",
+      "â€¢ Variables being analyzed: ", paste(colnames(spearman_corr), collapse=", "), "</p>",
       
       "<p><strong>Matrix Health Indicators:</strong><br>",
-      "• Matrix determinant: ", format(det(spearman_corr), digits = 6), 
+      "â€¢ Matrix determinant: ", format(det(spearman_corr), digits = 6), 
       "<br><em>Interpretation:</em> ", 
       if(det(spearman_corr) < 0.00001) {
         "Very low determinant indicates potential multicollinearity issues. This suggests some variables may be too highly correlated, which could affect factor stability."
@@ -1103,7 +1214,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       },
       "<br><br>",
       
-      "• Matrix condition number: ", format(kappa(spearman_corr), digits = 3),
+      "â€¢ Matrix condition number: ", format(kappa(spearman_corr), digits = 3),
       "<br><em>Interpretation:</em> ", 
       if(kappa(spearman_corr) > 30) {
         "High condition number indicates potential computational instability. Results should be interpreted with caution as the matrix may be close to singular."
@@ -1117,21 +1228,21 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       "</p>",
       
       "<p><strong>Issues Detected:</strong><br>",
-      "• Variables with no significant loadings: [", length(low_loading_items), "] ", 
+      "â€¢ Variables with no significant loadings: [", length(low_loading_items), "] ", 
       paste(low_loading_items, collapse = ", "), "<br>",
       if(length(low_loading_items) > 0) {
         paste0("<em>Note:</em> These variables show no loadings above the threshold of ", 
                loading_threshold, " on any factor.<br>")
       },
       
-      "• Variables with low communality: [", length(low_communalities), "] ", 
+      "â€¢ Variables with low communality: [", length(low_communalities), "] ", 
       paste(low_communalities, collapse = ", "), "<br>",
       if(length(low_communalities) > 0) {
         paste0("<em>Note:</em> These variables have communalities below the threshold of ", 
                communality_threshold, ", indicating poor explanation by the factor solution.<br>")
       },
       
-      "• Cross-loading variables: [", length(cross_loading_items), "] ", 
+      "â€¢ Cross-loading variables: [", length(cross_loading_items), "] ", 
       paste(cross_loading_items, collapse = ", "), "<br>",
       if(length(cross_loading_items) > 0) {
         "These variables load significantly on multiple factors, which may indicate complexity or poor factor differentiation.<br>"
@@ -1284,9 +1395,9 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       paste0(
         "<h4>Factor Correlation Matrix</h4>",
         "<p><strong>Interpretation Guide:</strong><br>",
-        "• Correlations > 0.7 (red): Strong relationship - factors might be redundant<br>",
-        "• Correlations 0.5-0.7 (orange): Moderate relationship - expected in oblique rotation<br>",
-        "• Correlations < 0.5 (black): Weak relationship - factors are relatively distinct</p>",
+        "â€¢ Correlations > 0.7 (red): Strong relationship - factors might be redundant<br>",
+        "â€¢ Correlations 0.5-0.7 (orange): Moderate relationship - expected in oblique rotation<br>",
+        "â€¢ Correlations < 0.5 (black): Weak relationship - factors are relatively distinct</p>",
         cor_table
       )
     } else {
@@ -1716,39 +1827,76 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         scale_max = input$scale_max
       )
       
+      factor_size_warnings <- character(0)
+      for(f in seq_along(factor_items)) {
+        factor_item_count <- length(factor_items[[f]])
+        if(factor_item_count > 0 && factor_item_count < 3) {
+          factor_size_warnings <- c(
+            factor_size_warnings,
+            sprintf(
+              "PA%d has %d primary indicator(s). Solutions with fewer than 3 strong primary indicators are usually less stable and harder to interpret.",
+              f, factor_item_count
+            )
+          )
+        }
+      }
+      factor_size_warnings <- unique(factor_size_warnings)
+      if(length(factor_size_warnings) > 0) {
+        analysis_warnings <- unique(c(analysis_warnings, factor_size_warnings))
+      }
+      if(length(correlation_warnings) > 0) {
+        analysis_warnings <- unique(c(analysis_warnings, correlation_warnings))
+      }
+      
+      factor_size_warning_html <- if(length(factor_size_warnings) > 0) {
+        paste0(
+          "<div style='background-color:#fff3cd; border:1px solid #ffeeba; padding:10px; margin:10px 0;'>",
+          "<strong>Factor-size cautions:</strong>",
+          "<ul>",
+          paste(sprintf("<li>%s</li>", factor_size_warnings), collapse = ""),
+          "</ul>",
+          "</div>"
+        )
+      } else {
+        ""
+      }
+      
+      warning_summary_html <- build_warning_summary_html(analysis_warnings)
+      
       # Create final HTML summary
       final_summary_html <- paste0(
         "<h2>Overall Summary</h2>",
         
         "<p><strong>Dataset Information:</strong><br>",
-        "• Dataset name: ", filename, "<br>",
-        "• Number of rows of data: ", nrow(data), "<br>",
-        "• Report generated: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "</p>",
+        "â€¢ Dataset name: ", filename, "<br>",
+        "â€¢ Number of rows of data: ", nrow(data), "<br>",
+        "â€¢ Report generated: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "</p>",
         
         "<p><strong>Analysis Settings:</strong><br>",
-        "• Number of Factors: ", nfactors, "<br>",
-        "• Rotation Method: ", rotation, "<br>",
-        "• Factor Method: ", extraction_method, "<br>",
-        "• Correlation Method: ", correlation_type, 
+        "â€¢ Number of Factors: ", nfactors, "<br>",
+        "â€¢ Rotation Method: ", rotation, "<br>",
+        "â€¢ Factor Method: ", extraction_method, "<br>",
+        "â€¢ Correlation Method: ", correlation_type, 
         if(correlation_type == "polychoric") {
           " (Note: Polychoric correlations are specifically designed for ordinal data like Likert scales)"
         } else "",
         "<br>",
-        "• Loading Threshold: ", loading_threshold, "<br>",
-        "• Communality Threshold: ", communality_threshold, "</p>",
+        "â€¢ Loading Threshold: ", loading_threshold, "<br>",
+        "â€¢ Communality Threshold: ", communality_threshold, "</p>",
         
         "<p><strong>Analysis Results:</strong><br>",
-        "• Total Iterations: ", iteration, "<br>",
-        "• Initial Variables: ", initial_item_count, "<br>",
-        "• Final Variables: ", nrow(spearman_corr), "</p>",
+        "â€¢ Total Iterations: ", iteration, "<br>",
+        "â€¢ Initial Variables: ", initial_item_count, "<br>",
+        "â€¢ Final Variables: ", nrow(spearman_corr), "</p>",
         
         "<h3>Reliability Statistics</h3>",
         "<p><strong>Overall Scale Reliability:</strong><br>",
-        "• Cronbach's alpha: ", round(cronbach_alpha, 3), "<br>",
-        "• McDonald's omega: ", round(mcdonalds_omega, 3), "</p>",
+        "â€¢ Cronbach's alpha: ", round(cronbach_alpha, 3), "<br>",
+        "â€¢ McDonald's omega: ", round(mcdonalds_omega, 3), "</p>",
         
         "<h4>Factor-Specific Reliability:</h4>",
         reliability_table_html,
+        factor_size_warning_html,
         "<br>",  # Add spacing
         spss_syntax,
         
@@ -1786,26 +1934,11 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         
         "<p><strong>Interpretation:</strong><br>",
         if(mvn_results$skew_p < 0.05 || mvn_results$kurt_p < 0.05) {
-          paste0(
-            "• Your data significantly deviates from multivariate normality (p < 0.05).<br>",
-            "• This is common in real-world data and has implications for your factor analysis:<br>",
-            "&nbsp;&nbsp;1. You should use the Spearman correlation matrix (currently selected: ", correlation_type, ")<br>",
-            "&nbsp;&nbsp;2. Consider robust estimation methods like Principal Axis Factoring (currently selected: ", extraction_method, ")<br>",
-            "&nbsp;&nbsp;3. Be cautious with Maximum Likelihood estimation as it assumes multivariate normality<br>",
-            "• Your current settings are ", 
-            if(correlation_type == "spearman" && extraction_method != "ml") {
-              "appropriate for non-normal data."
-            } else {
-              "not optimal for non-normal data. Consider adjusting them as suggested above."
-            }
-          )
+          "Mardia's test is significant, so the data may not behave like jointly normal continuous variables. Use extra caution with methods that depend strongly on multivariate normality assumptions."
         } else {
-          paste0(
-            "• Your data does not significantly deviate from multivariate normality (p ≥ 0.05).<br>",
-            "• This means you can confidently use either Pearson or Spearman correlations<br>",
-            "• All factor extraction methods, including Maximum Likelihood, are appropriate"
-          )
+          "Mardia's test is not significant, which provides less evidence of multivariate-normality problems. Matrix choice is still based mainly on measurement level, distribution shape, and analytic goals."
         },
+        "<br><br><strong>Matrix-choice reminder:</strong> Choose Pearson, polychoric, or Spearman based on measurement characteristics and your analytic goal. Spearman can be useful as a robustness check, but significant Mardia results alone should not determine matrix choice.",
         "</p>",
         
         "<h3>Sampling Adequacy Tests</h3>",
@@ -1852,15 +1985,15 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         if(bartlett_test$p.value < 0.05) {
           paste0(
             " The test is significant (p < 0.05)<br>",
-            "• This indicates your variables are sufficiently correlated for factor analysis<br>",
-            "• You can proceed with your factor analysis"
+            "â€¢ This indicates your variables are sufficiently correlated for factor analysis<br>",
+            "â€¢ You can proceed with your factor analysis"
           )
         } else {
           paste0(
-            "• The test is not significant (p ≥ 0.05)<br>",
-            "• This suggests your variables may not be sufficiently correlated<br>",
-            "• Factor analysis may not be appropriate for your data<br>",
-            "• Consider examining your correlation matrix for patterns of relationships"
+            "â€¢ The test is not significant (p â‰¥ 0.05)<br>",
+            "â€¢ This suggests your variables may not be sufficiently correlated<br>",
+            "â€¢ Factor analysis may not be appropriate for your data<br>",
+            "â€¢ Consider examining your correlation matrix for patterns of relationships"
           )
         },
         "</p>"
@@ -1868,6 +2001,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       
       # Create final HTML with summary at top
       html_output_all <- paste0(
+        warning_summary_html,
         final_summary_html,
         "<hr><h2>Detailed Iteration Results</h2>",
         paste(iteration_results, collapse = "<hr>")
@@ -2000,8 +2134,9 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     final_alpha = cronbach_alpha,
     final_omega = mcdonalds_omega,
     html_output = html_output_all,
-    warnings = character(0),
-    correlation_warnings = correlation_warnings
+    warnings = unique(analysis_warnings),
+    correlation_warnings = correlation_warnings,
+    iteration_warnings = iteration_warning_log
   )
   
   # Add debug output before returning

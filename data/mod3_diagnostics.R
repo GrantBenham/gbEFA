@@ -268,21 +268,26 @@ mod3_diagnostics_server <- function(id) {
         
         "<p><strong>Interpretation:</strong><br>",
         if(results$mvn_results$skew_p < 0.05 || results$mvn_results$kurt_p < 0.05) {
-          paste0(
-            "• Your data significantly deviates from multivariate normality (p < 0.05).<br>",
-            "• This is common in real-world data and has implications for your factor analysis:<br>",
-            "&nbsp;&nbsp;1. You should use the Spearman correlation matrix<br>",
-            "&nbsp;&nbsp;2. Consider robust estimation methods like Principal Axis Factoring<br>",
-            "&nbsp;&nbsp;3. Be cautious with Maximum Likelihood estimation as it assumes multivariate normality"
-          )
+          "Mardia's test is significant, suggesting your data may not behave like jointly normal continuous variables. By itself, it does not determine which correlation matrix you should use."
         } else {
-          paste0(
-            "• Your data does not significantly deviate from multivariate normality (p ≥ 0.05).<br>",
-            "• This means you can confidently use either Pearson or Spearman correlations<br>",
-            "• All factor extraction methods, including Maximum Likelihood, are appropriate"
-          )
+          "Mardia's test is not significant, which provides less evidence of multivariate-normality problems. Correlation-matrix choice should still be based on measurement characteristics and analytic goals."
         },
         "</p>",
+        
+        "<h3>Interpreting Normality and Choosing a Correlation Matrix</h3>",
+        "<p><strong>Univariate diagnostics.</strong><br>",
+        "Inspect skewness, kurtosis, and response distributions for each variable. Strong skewness, floor/ceiling effects, or sparse response categories may affect correlations and factor solutions.</p>",
+        "<p><strong>Multivariate diagnostics.</strong><br>",
+        "Mardia's test evaluates whether the data behave like jointly normal continuous variables. A significant result suggests caution with methods that rely strongly on continuous multivariate normality assumptions. It does not by itself determine which correlation matrix should be used.</p>",
+        "<p><strong>Choosing a correlation matrix.</strong><br>",
+        "Matrix choice should be based primarily on the measurement characteristics of the variables and the analytic goals:</p>",
+        "<ul>",
+        "<li><strong>Pearson:</strong> Traditional continuous-style option; often reasonable for Likert-type items with 5-7 response categories when distributions are not severely distorted.</li>",
+        "<li><strong>Polychoric:</strong> Often appropriate for ordinal Likert-type items because it is designed for categorical responses that may reflect underlying continuous latent variables. It is not a universal fix for multivariate non-normality and can also be affected by strong skewness or sparse categories.</li>",
+        "<li><strong>Spearman:</strong> Rank-based alternative that can be useful as a robustness or sensitivity analysis option, but should not be treated as the default only because multivariate normality is violated.</li>",
+        "</ul>",
+        "<p><strong>Practical recommendation.</strong><br>",
+        "Consider the number of response categories, degree of skewness, sparsity of response categories, and your substantive goal when choosing among Pearson, polychoric, and Spearman. When in doubt, comparing more than one matrix may be informative.</p>",
         
         "<h3>Correlation Analysis</h3>",
         "<h4>Correlation Matrix Heatmap</h4>",
@@ -371,8 +376,8 @@ mod3_diagnostics_server <- function(id) {
         },
         "</p>",
         
-        "<h3>Recommendations for EFA</h3>",
-        "<p>Based on the diagnostic results, the following settings are recommended for your EFA:</p>",
+        "<h3>General EFA Parameter Guidance</h3>",
+        "<p>The settings below are practical defaults and should be combined with theory, measurement quality, and interpretability.</p>",
         
         "<h4>Suggested Thresholds:</h4>",
         "<p>General guidelines for interpretation:</p>",
@@ -406,3 +411,4 @@ mod3_diagnostics_server <- function(id) {
     )
   })
 }
+

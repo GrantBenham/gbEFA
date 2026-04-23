@@ -92,9 +92,9 @@ mod0_introduction_ui <- function(id) {
             </li>
             <li>Correlation matrix options:
               <ul>
+                <li>Polychoric</li>
                 <li>Pearson</li>
                 <li>Spearman</li>
-                <li>Polychoric</li>
               </ul>
             </li>
             <li>Customizable thresholds for:
@@ -111,6 +111,12 @@ mod0_introduction_ui <- function(id) {
               </ul>
             </li>
             <li>Detailed results export options</li>
+            <li>Rule-specific caution settings:
+              <ul>
+                <li>Warnings by default for common heuristics</li>
+                <li>Optional hard-stop checkboxes for stricter workflows</li>
+              </ul>
+            </li>
           </ul>
         </div>
         

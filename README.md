@@ -9,8 +9,8 @@ The Integrated gbEFA Application is a Shiny web application designed for Explora
 - **Introduction Module**: Provides an overview of the application and its functionalities.
 - **Multicollinearity Check Module**: Allows users to upload a dataset and check for multicollinearity using Variance Inflation Factor (VIF) analysis.
 - **Factor Estimation Module**: Estimates the number of factors to retain based on various criteria.
-- **Diagnostics Module**: Conducts data diagnostics, including normality tests and correlation analysis.
-- **Exploratory Factor Analysis Module**: Performs EFA with options for different extraction and rotation methods, and generates detailed reports.
+- **Diagnostics Module**: Conducts data diagnostics, including univariate and multivariate normality checks, correlation analysis, and an always-visible guidance section on interpreting normality and choosing between Polychoric, Pearson, and Spearman matrices.
+- **Exploratory Factor Analysis Module**: Performs iterative EFA with selectable extraction/rotation methods, matrix options ordered as Polychoric -> Pearson -> Spearman, and user-friendly caution workflows (warnings by default with optional rule-specific hard-stop checkboxes).
 
 ## Requirements
 
