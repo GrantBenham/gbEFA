@@ -34,22 +34,22 @@ mod4_efa_ui <- function(id) {
                     "Principal Axis Factoring" = "pa", 
                     "Minimum Residual" = "minres"
                   ),
-                  selected = "pa"),
+                  selected = "minres"),
         
         selectInput(ns("rotation"), "Rotation Method",
                   choices = c("promax", "varimax", "oblimin", "quartimax"),
-                  selected = "promax"),
+                  selected = "oblimin"),
         
         selectInput(ns("correlation"), "Correlation Matrix Type",
                   choices = c("Polychoric" = "polychoric",
                               "Pearson" = "pearson",
                               "Spearman" = "spearman"),
-                  selected = "polychoric"),
+                  selected = "pearson"),
         
         helpText("Polychoric is often useful for ordinal Likert items; Pearson is a traditional continuous-style option; Spearman is useful as a robustness check."),
         
         numericInput(ns("loading_threshold"), "Loading Threshold",
-                   value = 0.3, min = 0, max = 1, step = 0.05),
+                   value = 0.33, min = 0, max = 1, step = 0.05),
         
         numericInput(ns("communality_threshold"), "Communality Threshold",
                    value = 0.2, min = 0, max = 1, step = 0.05),
@@ -129,7 +129,7 @@ mod4_efa_server <- function(id) {
       div(
         numericInput(session$ns("nfactors"), 
                     "Number of Factors",
-                    value = min(3, technical_max_factors), 
+                    value = min(6, technical_max_factors), 
                     min = 1,
                     max = technical_max_factors),
         helpText(sprintf(
@@ -421,8 +421,8 @@ create_report_template <- function(results, format) {
 }
 
 # Modified perform_iterative_efa function
-perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "spearman",
-                                  extraction_method = "pa", loading_threshold = 0.3,
+perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "pearson",
+                                  extraction_method = "minres", loading_threshold = 0.33,
                                   communality_threshold = 0.2, filename = "dataset",
                                   pre_run_warnings = character(0),
                                   enforce_iterative_items_per_factor_rule = FALSE) {
@@ -447,6 +447,8 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
   factor_omegas <- numeric(nfactors)
   html_output_all <- ""
   last_successful_efa <- NULL
+  last_successful_iteration <- NA_integer_
+  last_successful_variable_names <- colnames(data)
   original_variable_order <- colnames(data)
   
   # Initialize reliability measures
@@ -505,6 +507,120 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       "<ul>",
       paste(sprintf("<li>%s</li>", warnings_vec), collapse = ""),
       "</ul>",
+      "</div>"
+    )
+  }
+  
+  build_last_successful_factor_summary_html <- function(
+    efa_obj,
+    data_full,
+    variable_names,
+    loading_cut,
+    iteration_id
+  ) {
+    if(is.null(efa_obj) || is.null(variable_names) || length(variable_names) == 0) {
+      return("")
+    }
+    if(is.null(data_full) || !is.data.frame(data_full)) {
+      return("")
+    }
+    
+    loadings_matrix <- tryCatch({
+      as.matrix(unclass(efa_obj$loadings))
+    }, error = function(e) {
+      NULL
+    })
+    if(is.null(loadings_matrix) || nrow(loadings_matrix) == 0 || ncol(loadings_matrix) == 0) {
+      return("")
+    }
+    
+    if(is.null(rownames(loadings_matrix))) {
+      fallback_names <- variable_names[seq_len(min(length(variable_names), nrow(loadings_matrix)))]
+      rownames(loadings_matrix) <- fallback_names
+    }
+    if(is.null(colnames(loadings_matrix))) {
+      colnames(loadings_matrix) <- paste0("PA", seq_len(ncol(loadings_matrix)))
+    }
+    
+    factor_names <- colnames(loadings_matrix)
+    primary_items <- vector("list", length(factor_names))
+    names(primary_items) <- factor_names
+    
+    for(i in seq_len(nrow(loadings_matrix))) {
+      item_name <- rownames(loadings_matrix)[i]
+      item_loadings <- abs(loadings_matrix[i, ])
+      if(length(item_loadings) == 0 || all(is.na(item_loadings))) {
+        next
+      }
+      best_factor <- which.max(item_loadings)[1]
+      if(!is.na(item_loadings[best_factor]) && item_loadings[best_factor] >= loading_cut) {
+        primary_items[[best_factor]] <- c(primary_items[[best_factor]], item_name)
+      }
+    }
+    
+    summary_rows <- character(0)
+    for(i in seq_along(factor_names)) {
+      items <- unique(primary_items[[i]])
+      item_text <- if(length(items) > 0) {
+        htmlEscape(paste(items, collapse = ", "))
+      } else {
+        "None above loading threshold"
+      }
+      
+      alpha_text <- "NA (< 3 items)"
+      omega_text <- "NA (< 3 items)"
+      if(length(items) >= 3 && all(items %in% colnames(data_full))) {
+        factor_data <- data_full[, items, drop = FALSE]
+        alpha_val <- tryCatch({
+          psych::alpha(factor_data)$total$raw_alpha
+        }, error = function(e) {
+          NA_real_
+        })
+        omega_val <- tryCatch({
+          suppressWarnings(
+            suppressMessages(
+              psych::omega(factor_data, plot = FALSE, digits = 3)$omega.tot
+            )
+          )
+        }, error = function(e) {
+          NA_real_
+        })
+        alpha_text <- ifelse(is.na(alpha_val), "NA", sprintf("%.3f", alpha_val))
+        omega_text <- ifelse(is.na(omega_val), "NA", sprintf("%.3f", omega_val))
+      }
+      
+      summary_rows <- c(
+        summary_rows,
+        paste0(
+          "<tr>",
+          "<td>", htmlEscape(factor_names[i]), "</td>",
+          "<td>", item_text, "</td>",
+          "<td>", alpha_text, "</td>",
+          "<td>", omega_text, "</td>",
+          "</tr>"
+        )
+      )
+    }
+    
+    avg_items_per_factor <- length(variable_names) / max(1, length(factor_names))
+    avg_note <- if(avg_items_per_factor < 3) {
+      paste0(
+        "<p><strong>Caution:</strong> The last successful fit had fewer than 3 items per factor on average (",
+        length(variable_names), " / ", length(factor_names), ").</p>"
+      )
+    } else {
+      ""
+    }
+    
+    paste0(
+      "<div style='background-color:#f8f9fa; border:1px solid #d9d9d9; padding:12px; margin:12px 0;'>",
+      "<h3 style='margin-top:0;'>Last Successful Iteration Summary</h3>",
+      "<p>This table shows the most recent completed fit (Iteration ", iteration_id, ") before the halt.</p>",
+      avg_note,
+      "<table class='table table-bordered' style='width:100%;'>",
+      "<thead><tr><th>Factor</th><th>Primary Items</th><th>Cronbach's alpha</th><th>McDonald's omega</th></tr></thead>",
+      "<tbody>", paste(summary_rows, collapse = ""), "</tbody>",
+      "</table>",
       "</div>"
     )
   }
@@ -800,9 +916,6 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       cat("\n")
     }
     
-    # Store the current EFA result before attempting next iteration
-    last_successful_efa <- NULL
-    
     # Run EFA using the correlation matrix with enhanced error handling
     result <- tryCatch({
       cat("DEBUG: Starting tryCatch block\n")
@@ -936,6 +1049,19 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       } else {
         "<strong>No item removals had occurred before this failed fit.</strong><br><br>"
       }
+      items_per_factor_note <- ""
+      if(ncol(spearman_corr) < (nfactors * 3)) {
+        if(isTRUE(enforce_iterative_items_per_factor_rule)) {
+          items_per_factor_note <- paste0(
+            "<strong>Items-per-factor rule status:</strong> Hard-stop was enabled for this rule. ",
+            "If this threshold was crossed, the run would stop immediately.<br><br>"
+          )
+        } else {
+          items_per_factor_note <- paste0(
+            "<strong>Items-per-factor rule status:</strong> Hard-stop was unchecked, so this threshold was treated as a warning only and did not stop the run.<br><br>"
+          )
+        }
+      }
       
       # Create user-friendly error message based on error type
       error_msg <- if(grepl("Insufficient variables", e$message)) {
@@ -944,6 +1070,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         paste0(
           failure_context,
           prior_step_note,
+          items_per_factor_note,
           sprintf(
             "Factor analysis failed to find a stable solution with %d factors at this iteration.<br><br>
             <strong>Why this happened:</strong><br>
@@ -961,6 +1088,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         paste0(
           failure_context,
           prior_step_note,
+          items_per_factor_note,
           sprintf(
             "Factor analysis failed to converge after 500 iterations.<br><br>
             <strong>Why this happened:</strong><br>
@@ -977,6 +1105,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         paste0(
           failure_context,
           prior_step_note,
+          items_per_factor_note,
           sprintf(
             "An unexpected error occurred during factor analysis.<br><br>
             Error details: %s<br><br>
@@ -1007,6 +1136,13 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     if(!result$success) {
       cat("DEBUG: Analysis failed, returning results\n")
       warning_summary_html <- build_warning_summary_html(unique(c(analysis_warnings, correlation_warnings)))
+      last_successful_summary_html <- build_last_successful_factor_summary_html(
+        efa_obj = last_successful_efa,
+        data_full = data,
+        variable_names = last_successful_variable_names,
+        loading_cut = loading_threshold,
+        iteration_id = last_successful_iteration
+      )
       prior_iteration_html <- if(length(iteration_results) > 0) {
         paste0(
           "<hr><h2>Detailed Iteration Results Completed Before Halt</h2>",
@@ -1024,6 +1160,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         efa_result = last_successful_efa,
         html_output = paste0(
           warning_summary_html,
+          last_successful_summary_html,
           prior_iteration_html,
           failure_block_html
         ),
@@ -1421,6 +1558,9 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     
     # In the main loop, store each iteration's HTML
     iteration_results[[iteration]] <- html_output_iteration
+    last_successful_efa <- efa_result
+    last_successful_iteration <- iteration
+    last_successful_variable_names <- colnames(spearman_corr)
     
     # If final iteration, add additional statistics
     if (length(items_to_remove) == 0) {
