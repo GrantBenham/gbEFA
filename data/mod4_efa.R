@@ -51,8 +51,14 @@ mod4_efa_ui <- function(id) {
         numericInput(ns("loading_threshold"), "Loading Threshold",
                    value = 0.33, min = 0, max = 1, step = 0.05),
         
-        numericInput(ns("communality_threshold"), "Communality Threshold",
-                   value = 0.2, min = 0, max = 1, step = 0.05),
+        numericInput(
+          ns("communality_threshold"),
+          tags$span(
+            "Communality Threshold",
+            title = "Common settings are around 0.20 to 0.40. A practical default is 0.30 for many EFA workflows."
+          ),
+          value = 0.3, min = 0, max = 1, step = 0.05
+        ),
         
         h4("Optional Rule Enforcement"),
         checkboxInput(
@@ -423,7 +429,7 @@ create_report_template <- function(results, format) {
 # Modified perform_iterative_efa function
 perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "pearson",
                                   extraction_method = "minres", loading_threshold = 0.33,
-                                  communality_threshold = 0.2, filename = "dataset",
+                                  communality_threshold = 0.3, filename = "dataset",
                                   pre_run_warnings = character(0),
                                   enforce_iterative_items_per_factor_rule = FALSE) {
   
