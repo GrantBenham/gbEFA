@@ -20,6 +20,16 @@ library(base64enc)
 # Define UI for Module 4: Factor Analysis
 mod4_efa_ui <- function(id) {
   ns <- NS(id)
+  tooltip_label <- function(label_text, tooltip_text) {
+    tagList(
+      label_text,
+      tags$span(
+        " (?)",
+        title = tooltip_text,
+        style = "cursor: help; color: #555; font-weight: normal;"
+      )
+    )
+  }
   fluidPage(
     titlePanel("Exploratory Factor Analysis"),
     sidebarLayout(
@@ -48,14 +58,30 @@ mod4_efa_ui <- function(id) {
         
         helpText("Polychoric is often useful for ordinal Likert items; Pearson is a traditional continuous-style option; Spearman is useful as a robustness check."),
         
-        numericInput(ns("loading_threshold"), "Loading Threshold",
-                   value = 0.33, min = 0, max = 1, step = 0.05),
+        numericInput(
+          ns("loading_threshold"),
+          tooltip_label(
+            "Loading Threshold",
+            paste(
+              "Common settings are around 0.30 to 0.40, and 0.33 is a valid default.",
+              "Any value you enter (0 to 1) is applied directly in the analysis.",
+              "Lower values keep more items but can increase cross-loadings/noise.",
+              "Higher values are stricter and can improve clarity but remove more items."
+            )
+          ),
+          value = 0.33, min = 0, max = 1, step = 0.05
+        ),
         
         numericInput(
           ns("communality_threshold"),
-          tags$span(
+          tooltip_label(
             "Communality Threshold",
-            title = "Common settings are around 0.20 to 0.40. A practical default is 0.30 for many EFA workflows."
+            paste(
+              "Common settings are around 0.20 to 0.40; 0.30 is a practical middle-ground default.",
+              "Lower cutoff (e.g., 0.20): keeps more items, but may keep weak items that add noise or instability.",
+              "Higher cutoff (e.g., 0.40): cleaner factors, but can remove too many items and hurt content coverage.",
+              "Choice can depend on matrix type, extraction, sample size, and your analysis goal."
+            )
           ),
           value = 0.3, min = 0, max = 1, step = 0.05
         ),
