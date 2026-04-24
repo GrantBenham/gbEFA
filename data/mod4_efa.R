@@ -286,7 +286,20 @@ mod4_efa_server <- function(id) {
           incProgress(1, detail = "Complete")
         })
       }, error = function(e) {
-        if (grepl("maximum iteration exceeded", e$message)) {
+        error_message <- tryCatch(as.character(e$message), error = function(...) "Unknown error")
+        if(length(error_message) == 0 || is.na(error_message)) {
+          error_message <- "Unknown error"
+        }
+        
+        fallback_html <- paste0(
+          "<div style='color: red; font-weight: bold; margin: 20px 0;'>",
+          "<h4>Analysis Halted</h4>",
+          "<p>", htmlEscape(error_message), "</p>",
+          "<p>Try lowering the communality threshold and/or requesting fewer factors, then re-run the analysis.</p>",
+          "</div>"
+        )
+        
+        if (grepl("maximum iteration exceeded", error_message)) {
           showNotification(
             HTML(paste0(
               "<strong>Factor Analysis Error</strong><br>",
@@ -300,14 +313,21 @@ mod4_efa_server <- function(id) {
             duration = NULL,
             closeButton = TRUE
           )
-        } else if (grepl("subscript out of bounds", e$message)) {
+          results(list(
+            html_output = fallback_html,
+            warnings = "Analysis halted because the factor solution did not converge in time.",
+            correlation_warnings = character(0),
+            iteration_warnings = list()
+          ))
+        } else if (grepl("subscript out of bounds", error_message)) {
           showNotification(
             HTML(paste0(
               "<strong>Matrix Error</strong><br>",
               "Subscript out of bounds error.<br>",
-              "This usually means the correlation matrix is not positive definite.<br>",
+              "This can happen when the matrix becomes too small or unstable after item removal.<br>",
               "Try:<br>",
               "&bull; Reducing number of factors<br>",
+              "&bull; Lowering the communality threshold<br>",
               "&bull; Removing highly correlated variables<br>",
               "&bull; Using a different extraction method"
             )),
@@ -315,19 +335,31 @@ mod4_efa_server <- function(id) {
             duration = NULL,
             closeButton = TRUE
           )
+          results(list(
+            html_output = fallback_html,
+            warnings = "Analysis halted after matrix instability during iteration. Try less aggressive thresholds.",
+            correlation_warnings = character(0),
+            iteration_warnings = list()
+          ))
         } else {
           showNotification(
             HTML(paste0(
               "<strong>Analysis Error</strong><br>",
               "An unexpected error occurred:<br>",
-              e$message
+              htmlEscape(error_message)
             )),
             type = "error",
             duration = NULL,
             closeButton = TRUE
           )
+          results(list(
+            html_output = fallback_html,
+            warnings = "Analysis halted due to an unexpected runtime error.",
+            correlation_warnings = character(0),
+            iteration_warnings = list()
+          ))
         }
-        stop(e$message)
+        return(invisible(NULL))
       })
     })
     
@@ -2184,6 +2216,48 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     
     # Append this iteration's HTML to the overall output
     html_output_all <- paste0(html_output_all, html_output_iteration)
+    
+    # Guard against overly aggressive pruning that leaves too few items for the requested factors.
+    remaining_items_after_removal <- ncol(spearman_corr) - length(items_to_remove)
+    if(remaining_items_after_removal <= nfactors) {
+      depletion_warning <- sprintf(
+        "Iteration %d would remove %d item(s), leaving %d item(s) for %d factor(s). Analysis halted because factors must be fewer than remaining items.",
+        iteration, length(items_to_remove), remaining_items_after_removal, nfactors
+      )
+      add_analysis_warning(depletion_warning, iteration)
+      warning_summary_html <- build_warning_summary_html(unique(c(analysis_warnings, correlation_warnings)))
+      last_successful_summary_html <- build_last_successful_factor_summary_html(
+        efa_obj = last_successful_efa,
+        data_full = data,
+        variable_names = last_successful_variable_names,
+        loading_cut = loading_threshold,
+        iteration_id = last_successful_iteration
+      )
+      halt_html <- paste0(
+        "<div style='color: red; font-weight: bold; margin: 20px 0;'>",
+        "<h4>Analysis Halted</h4>",
+        "<p>", depletion_warning, "</p>",
+        "<p>Try lowering the communality threshold or requesting fewer factors.</p>",
+        "</div>"
+      )
+      return(list(
+        efa_result = last_successful_efa,
+        html_output = paste0(
+          warning_summary_html,
+          last_successful_summary_html,
+          "<hr><h2>Detailed Iteration Results Completed Before Halt</h2>",
+          paste(iteration_results, collapse = "<hr>"),
+          "<hr>",
+          halt_html
+        ),
+        warnings = unique(c(
+          analysis_warnings,
+          "Analysis halted before reaching a stable final solution."
+        )),
+        correlation_warnings = correlation_warnings,
+        iteration_warnings = iteration_warning_log
+      ))
+    }
     
     # Remove identified items for next iteration
     spearman_corr <- spearman_corr[!rownames(spearman_corr) %in% items_to_remove, 
