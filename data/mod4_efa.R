@@ -260,8 +260,8 @@ mod4_efa_server <- function(id) {
               "<strong>Factor Analysis Error</strong><br>",
               "Analysis failed to converge after 500 iterations.<br>",
               "This usually means either:<br>",
-              "â€¢ Too many factors requested<br>", 
-              "â€¢ High multicollinearity in data<br>",
+              "&bull; Too many factors requested<br>", 
+              "&bull; High multicollinearity in data<br>",
               "Try reducing the number of factors or removing highly correlated variables."
             )),
             type = "error",
@@ -275,9 +275,9 @@ mod4_efa_server <- function(id) {
               "Subscript out of bounds error.<br>",
               "This usually means the correlation matrix is not positive definite.<br>",
               "Try:<br>",
-              "â€¢ Reducing number of factors<br>",
-              "â€¢ Removing highly correlated variables<br>",
-              "â€¢ Using a different extraction method"
+              "&bull; Reducing number of factors<br>",
+              "&bull; Removing highly correlated variables<br>",
+              "&bull; Using a different extraction method"
             )),
             type = "error",
             duration = NULL,
@@ -793,16 +793,16 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     summary_text <- paste0(
       "<p><strong>Note on normality thresholds:</strong></p>",
       "<p><strong>Skewness:</strong><br>",
-      "â€¢ Values in orange (|skew| > 1) indicate moderate asymmetry<br>",
-      "â€¢ Values in red (|skew| > 2) indicate severe asymmetry<br>",
-      "â€¢ Values close to 0 indicate symmetry</p>",
+      "&bull; Values in orange (|skew| > 1) indicate moderate asymmetry<br>",
+      "&bull; Values in red (|skew| > 2) indicate severe asymmetry<br>",
+      "&bull; Values close to 0 indicate symmetry</p>",
       "<p><strong>Excess Kurtosis:</strong><br>",
       "The values shown are excess kurtosis (kurtosis - 3), centered around 0:<br>",
-      "â€¢ Positive values indicate heavier tails than normal distribution (leptokurtic)<br>",
-      "â€¢ Negative values indicate lighter tails than normal distribution (platykurtic)<br>",
-      "â€¢ Values close to 0 indicate normal-like tail weight (mesokurtic)<br>",
-      "â€¢ Values in orange (|excess kurtosis| > 1) indicate moderate deviation from normality<br>",
-      "â€¢ Values in red (|excess kurtosis| > 3) indicate severe deviation from normality</p>"
+      "&bull; Positive values indicate heavier tails than normal distribution (leptokurtic)<br>",
+      "&bull; Negative values indicate lighter tails than normal distribution (platykurtic)<br>",
+      "&bull; Values close to 0 indicate normal-like tail weight (mesokurtic)<br>",
+      "&bull; Values in orange (|excess kurtosis| > 1) indicate moderate deviation from normality<br>",
+      "&bull; Values in red (|excess kurtosis| > 3) indicate severe deviation from normality</p>"
     )
     
     list(table = tbl, summary = summary_text)
@@ -1334,11 +1334,11 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       "<h4>SUMMARY</h4>",
       iteration_warning_html,
       "<p><strong>Current Analysis Status:</strong><br>",
-      "â€¢ Number of variables in analysis: ", ncol(spearman_corr), "<br>",
-      "â€¢ Variables being analyzed: ", paste(colnames(spearman_corr), collapse=", "), "</p>",
+      "&bull; Number of variables in analysis: ", ncol(spearman_corr), "<br>",
+      "&bull; Variables being analyzed: ", paste(colnames(spearman_corr), collapse=", "), "</p>",
       
       "<p><strong>Matrix Health Indicators:</strong><br>",
-      "â€¢ Matrix determinant: ", format(det(spearman_corr), digits = 6), 
+      "&bull; Matrix determinant: ", format(det(spearman_corr), digits = 6), 
       "<br><em>Interpretation:</em> ", 
       if(det(spearman_corr) < 0.00001) {
         "Very low determinant indicates potential multicollinearity issues. This suggests some variables may be too highly correlated, which could affect factor stability."
@@ -1351,7 +1351,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       },
       "<br><br>",
       
-      "â€¢ Matrix condition number: ", format(kappa(spearman_corr), digits = 3),
+      "&bull; Matrix condition number: ", format(kappa(spearman_corr), digits = 3),
       "<br><em>Interpretation:</em> ", 
       if(kappa(spearman_corr) > 30) {
         "High condition number indicates potential computational instability. Results should be interpreted with caution as the matrix may be close to singular."
@@ -1365,21 +1365,21 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       "</p>",
       
       "<p><strong>Issues Detected:</strong><br>",
-      "â€¢ Variables with no significant loadings: [", length(low_loading_items), "] ", 
+      "&bull; Variables with no significant loadings: [", length(low_loading_items), "] ", 
       paste(low_loading_items, collapse = ", "), "<br>",
       if(length(low_loading_items) > 0) {
         paste0("<em>Note:</em> These variables show no loadings above the threshold of ", 
                loading_threshold, " on any factor.<br>")
       },
       
-      "â€¢ Variables with low communality: [", length(low_communalities), "] ", 
+      "&bull; Variables with low communality: [", length(low_communalities), "] ", 
       paste(low_communalities, collapse = ", "), "<br>",
       if(length(low_communalities) > 0) {
         paste0("<em>Note:</em> These variables have communalities below the threshold of ", 
                communality_threshold, ", indicating poor explanation by the factor solution.<br>")
       },
       
-      "â€¢ Cross-loading variables: [", length(cross_loading_items), "] ", 
+      "&bull; Cross-loading variables: [", length(cross_loading_items), "] ", 
       paste(cross_loading_items, collapse = ", "), "<br>",
       if(length(cross_loading_items) > 0) {
         "These variables load significantly on multiple factors, which may indicate complexity or poor factor differentiation.<br>"
@@ -1532,9 +1532,9 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       paste0(
         "<h4>Factor Correlation Matrix</h4>",
         "<p><strong>Interpretation Guide:</strong><br>",
-        "â€¢ Correlations > 0.7 (red): Strong relationship - factors might be redundant<br>",
-        "â€¢ Correlations 0.5-0.7 (orange): Moderate relationship - expected in oblique rotation<br>",
-        "â€¢ Correlations < 0.5 (black): Weak relationship - factors are relatively distinct</p>",
+        "&bull; Correlations > 0.7 (red): Strong relationship - factors might be redundant<br>",
+        "&bull; Correlations 0.5-0.7 (orange): Moderate relationship - expected in oblique rotation<br>",
+        "&bull; Correlations < 0.5 (black): Weak relationship - factors are relatively distinct</p>",
         cor_table
       )
     } else {
@@ -2008,31 +2008,31 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         "<h2>Overall Summary</h2>",
         
         "<p><strong>Dataset Information:</strong><br>",
-        "â€¢ Dataset name: ", filename, "<br>",
-        "â€¢ Number of rows of data: ", nrow(data), "<br>",
-        "â€¢ Report generated: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "</p>",
+        "&bull; Dataset name: ", filename, "<br>",
+        "&bull; Number of rows of data: ", nrow(data), "<br>",
+        "&bull; Report generated: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "</p>",
         
         "<p><strong>Analysis Settings:</strong><br>",
-        "â€¢ Number of Factors: ", nfactors, "<br>",
-        "â€¢ Rotation Method: ", rotation, "<br>",
-        "â€¢ Factor Method: ", extraction_method, "<br>",
-        "â€¢ Correlation Method: ", correlation_type, 
+        "&bull; Number of Factors: ", nfactors, "<br>",
+        "&bull; Rotation Method: ", rotation, "<br>",
+        "&bull; Factor Method: ", extraction_method, "<br>",
+        "&bull; Correlation Method: ", correlation_type, 
         if(correlation_type == "polychoric") {
           " (Note: Polychoric correlations are specifically designed for ordinal data like Likert scales)"
         } else "",
         "<br>",
-        "â€¢ Loading Threshold: ", loading_threshold, "<br>",
-        "â€¢ Communality Threshold: ", communality_threshold, "</p>",
+        "&bull; Loading Threshold: ", loading_threshold, "<br>",
+        "&bull; Communality Threshold: ", communality_threshold, "</p>",
         
         "<p><strong>Analysis Results:</strong><br>",
-        "â€¢ Total Iterations: ", iteration, "<br>",
-        "â€¢ Initial Variables: ", initial_item_count, "<br>",
-        "â€¢ Final Variables: ", nrow(spearman_corr), "</p>",
+        "&bull; Total Iterations: ", iteration, "<br>",
+        "&bull; Initial Variables: ", initial_item_count, "<br>",
+        "&bull; Final Variables: ", nrow(spearman_corr), "</p>",
         
         "<h3>Reliability Statistics</h3>",
         "<p><strong>Overall Scale Reliability:</strong><br>",
-        "â€¢ Cronbach's alpha: ", round(cronbach_alpha, 3), "<br>",
-        "â€¢ McDonald's omega: ", round(mcdonalds_omega, 3), "</p>",
+        "&bull; Cronbach's alpha: ", round(cronbach_alpha, 3), "<br>",
+        "&bull; McDonald's omega: ", round(mcdonalds_omega, 3), "</p>",
         
         "<h4>Factor-Specific Reliability:</h4>",
         reliability_table_html,
@@ -2125,15 +2125,15 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         if(bartlett_test$p.value < 0.05) {
           paste0(
             " The test is significant (p < 0.05)<br>",
-            "â€¢ This indicates your variables are sufficiently correlated for factor analysis<br>",
-            "â€¢ You can proceed with your factor analysis"
+            "&bull; This indicates your variables are sufficiently correlated for factor analysis<br>",
+            "&bull; You can proceed with your factor analysis"
           )
         } else {
           paste0(
-            "â€¢ The test is not significant (p â‰¥ 0.05)<br>",
-            "â€¢ This suggests your variables may not be sufficiently correlated<br>",
-            "â€¢ Factor analysis may not be appropriate for your data<br>",
-            "â€¢ Consider examining your correlation matrix for patterns of relationships"
+            "&bull; The test is not significant (p &ge; 0.05)<br>",
+            "&bull; This suggests your variables may not be sufficiently correlated<br>",
+            "&bull; Factor analysis may not be appropriate for your data<br>",
+            "&bull; Consider examining your correlation matrix for patterns of relationships"
           )
         },
         "</p>"

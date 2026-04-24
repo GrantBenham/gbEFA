@@ -74,16 +74,16 @@ create_univariate_table <- function(stats) {
   summary_text <- paste0(
     "<p><strong>Note on normality thresholds:</strong></p>",
     "<p><strong>Skewness:</strong><br>",
-    "• Values in orange (|skew| > 1) indicate moderate asymmetry<br>",
-    "• Values in red (|skew| > 2) indicate severe asymmetry<br>",
-    "• Values close to 0 indicate symmetry</p>",
+    "&bull; Values in orange (|skew| > 1) indicate moderate asymmetry<br>",
+    "&bull; Values in red (|skew| > 2) indicate severe asymmetry<br>",
+    "&bull; Values close to 0 indicate symmetry</p>",
     "<p><strong>Excess Kurtosis:</strong><br>",
     "The values shown are excess kurtosis (kurtosis - 3), centered around 0:<br>",
-    "• Positive values indicate heavier tails than normal distribution (leptokurtic)<br>",
-    "• Negative values indicate lighter tails than normal distribution (platykurtic)<br>",
-    "• Values close to 0 indicate normal-like tail weight (mesokurtic)<br>",
-    "• Values in orange (|excess kurtosis| > 1) indicate moderate deviation from normality<br>",
-    "• Values in red (|excess kurtosis| > 3) indicate severe deviation from normality</p>"
+    "&bull; Positive values indicate heavier tails than normal distribution (leptokurtic)<br>",
+    "&bull; Negative values indicate lighter tails than normal distribution (platykurtic)<br>",
+    "&bull; Values close to 0 indicate normal-like tail weight (mesokurtic)<br>",
+    "&bull; Values in orange (|excess kurtosis| > 1) indicate moderate deviation from normality<br>",
+    "&bull; Values in red (|excess kurtosis| > 3) indicate severe deviation from normality</p>"
   )
   
   list(table = tbl, summary = summary_text)
@@ -223,14 +223,14 @@ mod3_diagnostics_server <- function(id) {
       missing_section <- if(is.null(results$missing_analysis)) {
         "<p>Missing data analysis not available.</p>"
       } else if(!results$missing_analysis$has_missing) {
-        "<p><strong>✓ No missing values detected in the dataset.</strong></p>"
+        "<p><strong>OK: No missing values detected in the dataset.</strong></p>"
       } else {
         paste0(
-          "<p><strong>⚠ Warning: Missing values detected!</strong><br>",
+          "<p><strong>Warning: Missing values detected!</strong><br>",
           "Total missing values: ", results$missing_analysis$total_missing, "<br>",
           "Variables with missing values:<br>",
           paste(mapply(function(var, count) {
-            paste0("• ", var, ": ", count, " missing values")
+            paste0("&bull; ", var, ": ", count, " missing values")
           }, results$missing_analysis$vars_with_missing, 
           results$missing_analysis$missing_counts), 
           collapse = "<br>"),
@@ -295,7 +295,7 @@ mod3_diagnostics_server <- function(id) {
         
         "<h4>Matrix Determinant</h4>",
         "<p><strong>Matrix Health Indicators:</strong><br>",
-        "• Matrix determinant: ", format_small_value(results$corr_det), 
+        "&bull; Matrix determinant: ", format_small_value(results$corr_det), 
         "<br><em>Interpretation:</em> ", 
         if(results$corr_det < 0.00001) {
           "Very low determinant indicates potential multicollinearity issues. This suggests some variables may be too highly correlated, which could affect factor stability."
@@ -362,16 +362,16 @@ mod3_diagnostics_server <- function(id) {
         "<p><strong>Interpretation:</strong><br>",
         if(results$bartlett_test$p.value < 0.05) {
           paste0(
-            "• The test is significant (p < 0.05)<br>",
-            "• This indicates your variables are sufficiently correlated for factor analysis<br>",
-            "• You can proceed with your factor analysis"
+            "&bull; The test is significant (p < 0.05)<br>",
+            "&bull; This indicates your variables are sufficiently correlated for factor analysis<br>",
+            "&bull; You can proceed with your factor analysis"
           )
         } else {
           paste0(
-            "• The test is not significant (p ≥ 0.05)<br>",
-            "• This suggests your variables may not be sufficiently correlated<br>",
-            "• Factor analysis may not be appropriate for your data<br>",
-            "• Consider examining your correlation matrix for patterns of relationships"
+            "&bull; The test is not significant (p &ge; 0.05)<br>",
+            "&bull; This suggests your variables may not be sufficiently correlated<br>",
+            "&bull; Factor analysis may not be appropriate for your data<br>",
+            "&bull; Consider examining your correlation matrix for patterns of relationships"
           )
         },
         "</p>",
@@ -388,10 +388,10 @@ mod3_diagnostics_server <- function(id) {
         "<em>Note: Variables with communalities below this threshold may not be well-represented in the factor solution</em></li>",
         "</ul>",
         "<p><em>Note: These are general guidelines. Your final choice of thresholds should consider:<br>",
-        "• Sample size (larger samples can support lower thresholds)<br>",
-        "• Research phase (confirmatory work may require stricter thresholds)<br>",
-        "• Theoretical importance of variables<br>",
-        "• Domain-specific standards in your field</em></p>"
+        "&bull; Sample size (larger samples can support lower thresholds)<br>",
+        "&bull; Research phase (confirmatory work may require stricter thresholds)<br>",
+        "&bull; Theoretical importance of variables<br>",
+        "&bull; Domain-specific standards in your field</em></p>"
       ))
     }
     
