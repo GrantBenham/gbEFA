@@ -1004,6 +1004,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       
       # Try the EFA
       cat("DEBUG: About to attempt FA calculation\n")
+      fa_runtime_warnings <- character(0)
       efa_result <- withCallingHandlers({
         fa(r = spearman_corr, 
            nfactors = nfactors, 
@@ -1012,6 +1013,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
            max.iter = 500)
       }, warning = function(w) {
         cat("DEBUG: Warning caught:", w$message, "\n")
+        fa_runtime_warnings <<- unique(c(fa_runtime_warnings, conditionMessage(w)))
         invokeRestart("muffleWarning")
       })
       
@@ -1050,7 +1052,8 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
           success = TRUE,
           efa_result = efa_result,
           loadings = loadings,
-          communalities = communalities
+          communalities = communalities,
+          fa_warnings = fa_runtime_warnings
         )
       }, error = function(e) {
         cat("DEBUG: Error in post-processing:", e$message, "\n")
@@ -1241,6 +1244,11 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     efa_result <- result$efa_result
     loadings <- result$loadings
     communalities <- result$communalities
+    fa_runtime_warnings <- if(!is.null(result$fa_warnings)) {
+      unique(result$fa_warnings[nzchar(result$fa_warnings)])
+    } else {
+      character(0)
+    }
     
     # Post-EFA diagnostics
     if(ENABLE_DIAGNOSTICS) {
@@ -1378,6 +1386,251 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     })
     
     cat("DEBUG: Pattern matrix creation completed\n")
+    
+    # Build iteration-level fit and diagnostics panel (guarded so iteration logic is not disrupted).
+    fit_diagnostics_html <- tryCatch({
+      format_metric <- function(x, digits = 3) {
+        x_num <- suppressWarnings(as.numeric(x))
+        x_num <- x_num[is.finite(x_num)]
+        if(length(x_num) == 0) return("NA")
+        format(round(x_num[1], digits), nsmall = digits, scientific = FALSE)
+      }
+      format_pvalue <- function(x) {
+        x_num <- suppressWarnings(as.numeric(x))
+        x_num <- x_num[is.finite(x_num)]
+        if(length(x_num) == 0) return("NA")
+        if(x_num[1] < 1e-4) return("< 0.0001")
+        format(round(x_num[1], 4), nsmall = 4, scientific = FALSE)
+      }
+      status_text <- function(flag, flagged_text, ok_text = "Not flagged") {
+        if(isTRUE(flag)) {
+          paste0("<span style='color:#b30000; font-weight:bold;'>", flagged_text, "</span>")
+        } else {
+          ok_text
+        }
+      }
+      
+      # Global fit values from the current retained iteration solution.
+      rmsea_vals <- suppressWarnings(as.numeric(efa_result$RMSEA))
+      rmsea_est <- if(length(rmsea_vals) >= 1) rmsea_vals[1] else NA_real_
+      rmsea_lo <- if(length(rmsea_vals) >= 2) rmsea_vals[2] else NA_real_
+      rmsea_hi <- if(length(rmsea_vals) >= 3) rmsea_vals[3] else NA_real_
+      chi_stat <- if(!is.null(efa_result$STATISTIC)) efa_result$STATISTIC else efa_result$chi
+      p_val <- if(!is.null(efa_result$PVAL)) efa_result$PVAL else efa_result$EPVAL
+      
+      # Residual diagnostics.
+      residual_matrix <- tryCatch(as.matrix(efa_result$residual), error = function(e) NULL)
+      abs_residuals <- numeric(0)
+      if(!is.null(residual_matrix) && is.matrix(residual_matrix) && nrow(residual_matrix) > 1) {
+        abs_residuals <- abs(residual_matrix[lower.tri(residual_matrix)])
+        abs_residuals <- abs_residuals[is.finite(abs_residuals)]
+      }
+      max_abs_resid <- if(length(abs_residuals) > 0) max(abs_residuals) else NA_real_
+      mean_abs_resid <- if(length(abs_residuals) > 0) mean(abs_residuals) else NA_real_
+      pct_abs_resid_gt_05 <- if(length(abs_residuals) > 0) mean(abs_residuals > 0.05) * 100 else NA_real_
+      pct_abs_resid_gt_10 <- if(length(abs_residuals) > 0) mean(abs_residuals > 0.10) * 100 else NA_real_
+      
+      # Admissibility / stability checks.
+      uniquenesses <- suppressWarnings(as.numeric(efa_result$uniquenesses))
+      uniquenesses <- uniquenesses[is.finite(uniquenesses)]
+      non_convergence_flag <- any(grepl("converg|iteration|max", fa_runtime_warnings, ignore.case = TRUE))
+      heywood_flag <- any(uniquenesses < 0, na.rm = TRUE) || any(communalities > 1, na.rm = TRUE)
+      loading_gt1_flag <- if(exists("loadings_matrix") && is.matrix(loadings_matrix)) {
+        any(abs(loadings_matrix) > 1, na.rm = TRUE)
+      } else {
+        any(abs(as.matrix(unclass(loadings))) > 1, na.rm = TRUE)
+      }
+      near_singular_flag <- (det(spearman_corr) < 1e-5) || (kappa(spearman_corr) > 30)
+      
+      if(isTRUE(non_convergence_flag)) {
+        warning_text <- paste0("Iteration ", iteration, ": convergence warning detected; inspect fit and residual diagnostics carefully.")
+        iteration_specific_warnings <- unique(c(iteration_specific_warnings, warning_text))
+        add_analysis_warning(warning_text, iteration)
+      }
+      if(isTRUE(heywood_flag)) {
+        warning_text <- paste0("Iteration ", iteration, ": Heywood-type admissibility concern detected (negative uniqueness and/or communality > 1).")
+        iteration_specific_warnings <- unique(c(iteration_specific_warnings, warning_text))
+        add_analysis_warning(warning_text, iteration)
+      }
+      if(isTRUE(loading_gt1_flag)) {
+        warning_text <- paste0("Iteration ", iteration, ": At least one absolute loading exceeded 1.0, suggesting an unstable solution.")
+        iteration_specific_warnings <- unique(c(iteration_specific_warnings, warning_text))
+        add_analysis_warning(warning_text, iteration)
+      }
+      if(isTRUE(near_singular_flag)) {
+        warning_text <- paste0("Iteration ", iteration, ": Matrix near-singularity warning (high condition number and/or very small determinant).")
+        iteration_specific_warnings <- unique(c(iteration_specific_warnings, warning_text))
+        add_analysis_warning(warning_text, iteration)
+      }
+      
+      # Factor score adequacy / determinacy-style metrics.
+      determinacy_values <- numeric(0)
+      if(!is.null(efa_result$r.scores)) {
+        if(is.matrix(efa_result$r.scores)) {
+          determinacy_values <- suppressWarnings(as.numeric(diag(efa_result$r.scores)))
+        } else {
+          determinacy_values <- suppressWarnings(as.numeric(efa_result$r.scores))
+        }
+      }
+      if(length(determinacy_values) == 0 && !is.null(efa_result$score.cor)) {
+        if(is.matrix(efa_result$score.cor)) {
+          determinacy_values <- suppressWarnings(as.numeric(diag(efa_result$score.cor)))
+        } else {
+          determinacy_values <- suppressWarnings(as.numeric(efa_result$score.cor))
+        }
+      }
+      if(length(determinacy_values) == 0 && !is.null(efa_result$R2.scores)) {
+        r2_scores <- suppressWarnings(as.numeric(efa_result$R2.scores))
+        determinacy_values <- sqrt(pmax(r2_scores, 0))
+      }
+      determinacy_values <- determinacy_values[is.finite(determinacy_values)]
+      det_min <- if(length(determinacy_values) > 0) min(determinacy_values) else NA_real_
+      det_mean <- if(length(determinacy_values) > 0) mean(determinacy_values) else NA_real_
+      weak_det_idx <- if(length(determinacy_values) > 0) which(determinacy_values < 0.80) else integer(0)
+      weak_det_label <- if(length(weak_det_idx) > 0) {
+        paste0("PA", weak_det_idx, collapse = ", ")
+      } else {
+        "None"
+      }
+      if(length(weak_det_idx) > 0) {
+        warning_text <- paste0(
+          "Iteration ", iteration, ": weak factor score adequacy detected (determinacy < .80) for ",
+          weak_det_label, "."
+        )
+        iteration_specific_warnings <- unique(c(iteration_specific_warnings, warning_text))
+        add_analysis_warning(warning_text, iteration)
+      }
+      
+      # Retention decision evidence panel (single matrix, compact summary).
+      pa_recommendation <- NA_integer_
+      map_recommendation <- NA_integer_
+      vss_recommendation <- NA_integer_
+      retention_note <- ""
+      if(ncol(spearman_corr) >= 4) {
+        pa_obj <- tryCatch({
+          suppressWarnings(
+            suppressMessages(
+              psych::fa.parallel(
+                spearman_corr,
+                n.obs = nrow(data),
+                fm = extraction_method,
+                fa = "fa",
+                plot = FALSE,
+                error.bars = FALSE
+              )
+            )
+          )
+        }, error = function(e) NULL)
+        if(!is.null(pa_obj) && !is.null(pa_obj$nfact)) {
+          pa_recommendation <- suppressWarnings(as.integer(pa_obj$nfact[1]))
+        }
+        
+        vss_obj <- tryCatch({
+          suppressWarnings(
+            suppressMessages(
+              psych::VSS(
+                spearman_corr,
+                n = nrow(data),
+                fm = extraction_method,
+                rotate = "none",
+                plot = FALSE
+              )
+            )
+          )
+        }, error = function(e) NULL)
+        if(!is.null(vss_obj) && !is.null(vss_obj$map) && length(vss_obj$map) > 1) {
+          map_recommendation <- which.min(vss_obj$map)
+        }
+        if(!is.null(vss_obj) && !is.null(vss_obj$cfit.1) && length(vss_obj$cfit.1) > 1) {
+          vss_recommendation <- which.max(vss_obj$cfit.1)
+        } else if(!is.null(vss_obj) && !is.null(vss_obj$cfit.2) && length(vss_obj$cfit.2) > 1) {
+          vss_recommendation <- which.max(vss_obj$cfit.2)
+        }
+      } else {
+        retention_note <- "Retention recommendations are shown when at least 4 variables remain in the iteration matrix."
+      }
+      if(all(is.na(c(pa_recommendation, map_recommendation, vss_recommendation))) && !nzchar(retention_note)) {
+        retention_note <- "Retention recommendations were unavailable for this iteration matrix."
+      }
+      format_recommendation <- function(x) {
+        if(is.na(x)) "Unavailable" else as.character(x)
+      }
+      
+      runtime_warning_html <- if(length(fa_runtime_warnings) > 0) {
+        paste0(
+          "<p><strong>Runtime warning notes:</strong><br>",
+          paste0("&bull; ", htmlEscape(fa_runtime_warnings), collapse = "<br>"),
+          "</p>"
+        )
+      } else {
+        "<p><strong>Runtime warning notes:</strong> No runtime warnings reported by the solver for this iteration.</p>"
+      }
+      
+      paste0(
+        "<h4>Global EFA Fit (Current Retained Solution)</h4>",
+        "<p><em>These are iteration-level fit diagnostics for the currently retained solution before any next-step removals.</em></p>",
+        "<table class='table table-bordered' style='width:auto;'>",
+        "<tr><th>Metric</th><th>Value</th></tr>",
+        "<tr><td>RMSR</td><td>", format_metric(efa_result$rms, 3), "</td></tr>",
+        "<tr><td>RMSEA (90% CI)</td><td>", format_metric(rmsea_est, 3), " (", format_metric(rmsea_lo, 3), ", ", format_metric(rmsea_hi, 3), ")</td></tr>",
+        "<tr><td>TLI</td><td>", format_metric(efa_result$TLI, 3), "</td></tr>",
+        "<tr><td>BIC</td><td>", format_metric(efa_result$BIC, 2), "</td></tr>",
+        "<tr><td>Objective Function</td><td>", format_metric(efa_result$objective, 4), "</td></tr>",
+        "</table>",
+        
+        "<h4>Model Test Statistics</h4>",
+        "<table class='table table-bordered' style='width:auto;'>",
+        "<tr><th>Statistic</th><th>Value</th></tr>",
+        "<tr><td>Chi-square</td><td>", format_metric(chi_stat, 3), "</td></tr>",
+        "<tr><td>df</td><td>", format_metric(efa_result$dof, 0), "</td></tr>",
+        "<tr><td>p-value</td><td>", format_pvalue(p_val), "</td></tr>",
+        "</table>",
+        
+        "<h4>Residual Diagnostics</h4>",
+        "<table class='table table-bordered' style='width:auto;'>",
+        "<tr><th>Diagnostic</th><th>Value</th></tr>",
+        "<tr><td>Maximum |residual correlation|</td><td>", format_metric(max_abs_resid, 3), "</td></tr>",
+        "<tr><td>Mean |residual correlation|</td><td>", format_metric(mean_abs_resid, 3), "</td></tr>",
+        "<tr><td>% residuals with |residual| &gt; .05</td><td>", format_metric(pct_abs_resid_gt_05, 1), "%</td></tr>",
+        "<tr><td>% residuals with |residual| &gt; .10</td><td>", format_metric(pct_abs_resid_gt_10, 1), "%</td></tr>",
+        "</table>",
+        
+        "<h4>Admissibility and Stability Checks</h4>",
+        "<table class='table table-bordered' style='width:auto;'>",
+        "<tr><th>Check</th><th>Status</th></tr>",
+        "<tr><td>Non-convergence flag</td><td>", status_text(non_convergence_flag, "Flagged", "No non-convergence warning detected"), "</td></tr>",
+        "<tr><td>Heywood case flag</td><td>", status_text(heywood_flag, "Flagged", "No Heywood flag detected"), "</td></tr>",
+        "<tr><td>Any |loading| &gt; 1</td><td>", status_text(loading_gt1_flag, "Flagged", "No loading above 1.0 detected"), "</td></tr>",
+        "<tr><td>Near-singular / numerical instability</td><td>", status_text(near_singular_flag, "Flagged", "No strong near-singularity signal"), "</td></tr>",
+        "</table>",
+        runtime_warning_html,
+        
+        "<h4>Factor Score Adequacy</h4>",
+        "<table class='table table-bordered' style='width:auto;'>",
+        "<tr><th>Metric</th><th>Value</th></tr>",
+        "<tr><td>Minimum determinacy (or score-factor correlation proxy)</td><td>", format_metric(det_min, 3), "</td></tr>",
+        "<tr><td>Mean determinacy (or score-factor correlation proxy)</td><td>", format_metric(det_mean, 3), "</td></tr>",
+        "<tr><td>Factors with weak adequacy (&lt; .80)</td><td>", htmlEscape(weak_det_label), "</td></tr>",
+        "</table>",
+        
+        "<h4>Retention Decision Summary (Single-Matrix Evidence)</h4>",
+        "<table class='table table-bordered' style='width:auto;'>",
+        "<tr><th>Method</th><th>Recommended factors</th></tr>",
+        "<tr><td>Parallel Analysis</td><td>", format_recommendation(pa_recommendation), "</td></tr>",
+        "<tr><td>MAP</td><td>", format_recommendation(map_recommendation), "</td></tr>",
+        "<tr><td>VSS</td><td>", format_recommendation(vss_recommendation), "</td></tr>",
+        "</table>",
+        if(nzchar(retention_note)) paste0("<p><em>", htmlEscape(retention_note), "</em></p>") else ""
+      )
+    }, error = function(e) {
+      paste0(
+        "<h4>Model Fit and Diagnostics</h4>",
+        "<p><em>Iteration-level fit panel could not be generated: ",
+        htmlEscape(e$message),
+        ".</em></p>"
+      )
+    })
+    
     if(length(iteration_specific_warnings) > 0) {
       iteration_warning_log[[iteration]] <- unique(c(iteration_warning_log[[iteration]], iteration_specific_warnings))
       iteration_warning_html <- paste0(
@@ -1448,6 +1701,8 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       if(length(cross_loading_items) > 0) {
         "These variables load significantly on multiple factors, which may indicate complexity or poor factor differentiation.<br>"
       },
+      "</p>",
+      fit_diagnostics_html,
       
       "<p><strong>Action for Next Iteration:</strong><br>",
       if(length(items_to_remove) > 0) {
