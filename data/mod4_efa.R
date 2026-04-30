@@ -1029,6 +1029,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
            nfactors = nfactors, 
            rotate = rotation, 
            fm = extraction_method,
+           n.obs = nrow(data),
            max.iter = 500)
       }, warning = function(w) {
         cat("DEBUG: Warning caught:", w$message, "\n")
@@ -1935,7 +1936,8 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         efa_result <- fa(r = spearman_corr, 
                           nfactors = nfactors, 
                           rotate = rotation, 
-                          fm = extraction_method)
+                          fm = extraction_method,
+                          n.obs = nrow(data))
         
         # After initial EFA calculation, reorder factors by variance explained
         loadings <- efa_result$loadings
