@@ -554,7 +554,16 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     }
     analysis_warnings <<- unique(c(analysis_warnings, message_text))
     if(!is.null(iteration_id)) {
-      existing <- iteration_warning_log[[iteration_id]]
+      existing <- if(
+        is.numeric(iteration_id) &&
+        iteration_id >= 1 &&
+        iteration_id <= length(iteration_warning_log) &&
+        !is.null(iteration_warning_log[[iteration_id]])
+      ) {
+        iteration_warning_log[[iteration_id]]
+      } else {
+        character(0)
+      }
       iteration_warning_log[[iteration_id]] <<- unique(c(existing, message_text))
     }
     invisible(NULL)
