@@ -1552,6 +1552,29 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       if(all(is.na(c(pa_recommendation, map_recommendation, vss_recommendation))) && !nzchar(retention_note)) {
         retention_note <- "Retention recommendations were unavailable for this iteration matrix."
       }
+      available_retention <- c(
+        `Parallel Analysis` = pa_recommendation,
+        MAP = map_recommendation,
+        VSS = vss_recommendation
+      )
+      available_retention <- available_retention[!is.na(available_retention)]
+      retention_interpretation_html <- ""
+      if(length(available_retention) >= 2) {
+        retention_spread <- max(available_retention) - min(available_retention)
+        if(retention_spread >= 2) {
+          retention_interpretation_html <- paste0(
+            "<p><em><strong>How to interpret mixed retention results:</strong> It is common for Parallel Analysis, MAP, and VSS to disagree, especially when factors are moderately correlated or when item pools are small. Use these values as triangulation rather than a hard rule. Prior theory, interpretability, and item quality should guide the final factor count.</em></p>"
+          )
+        } else {
+          retention_interpretation_html <- paste0(
+            "<p><em><strong>How to interpret retention results:</strong> These methods are broadly convergent in this iteration. Still, treat them as decision aids and confirm your final factor count using theory, interpretability, and item quality.</em></p>"
+          )
+        }
+      } else if(length(available_retention) == 1) {
+        retention_interpretation_html <- paste0(
+          "<p><em><strong>How to interpret retention results:</strong> Only one retention index was available in this iteration. Use it cautiously and combine it with theory and solution interpretability.</em></p>"
+        )
+      }
       format_recommendation <- function(x) {
         if(is.na(x)) "Unavailable" else as.character(x)
       }
@@ -1620,6 +1643,7 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         "<tr><td>MAP</td><td>", format_recommendation(map_recommendation), "</td></tr>",
         "<tr><td>VSS</td><td>", format_recommendation(vss_recommendation), "</td></tr>",
         "</table>",
+        retention_interpretation_html,
         if(nzchar(retention_note)) paste0("<p><em>", htmlEscape(retention_note), "</em></p>") else ""
       )
     }, error = function(e) {
