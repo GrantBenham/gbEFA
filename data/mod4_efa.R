@@ -568,6 +568,16 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
     }
     invisible(NULL)
   }
+
+  normalize_correlation_method <- function(method_value, fallback_method = "spearman") {
+    valid_methods <- c("polychoric", "pearson", "spearman", "kendall")
+    method_chr <- as.character(method_value)
+    method_chr <- method_chr[nzchar(method_chr)]
+    if(length(method_chr) == 0) return(fallback_method)
+    method_chr <- tolower(method_chr[1])
+    if(!(method_chr %in% valid_methods)) return(fallback_method)
+    method_chr
+  }
   
   build_warning_summary_html <- function(warnings_vec) {
     warnings_vec <- unique(warnings_vec[nzchar(warnings_vec)])
@@ -2059,7 +2069,10 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
         
         tryCatch({
           # Store the correlation method being used
-          current_method <- attr(spearman_corr, "method")
+          current_method <- normalize_correlation_method(
+            attr(spearman_corr, "method"),
+            fallback_method = normalize_correlation_method(correlation_type, "spearman")
+          )
           cat(sprintf("DEBUG: Using correlation method: %s\n", current_method))
           
           # Calculate final correlation matrix using the same method as before
@@ -2075,7 +2088,14 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
             }
           } else {
             cat(sprintf("DEBUG: Computing final %s correlation matrix\n", current_method))
-            cor(full_data, method = current_method)
+            cor(
+              full_data,
+              method = ifelse(
+                current_method %in% c("pearson", "kendall", "spearman"),
+                current_method,
+                "spearman"
+              )
+            )
           }
           
           cat("DEBUG: Correlation matrix calculated successfully\n")
@@ -2116,11 +2136,10 @@ perform_iterative_efa <- function(data, nfactors, rotation, correlation_type = "
       full_data <- data  # Use the original loaded dataset
       
       # Get the correlation method safely
-      current_method <- if(!is.null(attr(spearman_corr, "method"))) {
-        attr(spearman_corr, "method")
-      } else {
-        correlation_type  # Fall back to the original correlation_type
-      }
+      current_method <- normalize_correlation_method(
+        attr(spearman_corr, "method"),
+        fallback_method = normalize_correlation_method(correlation_type, "spearman")
+      )
       
       cat(sprintf("DEBUG: Using correlation method: %s\n", current_method))
       
